@@ -1,0 +1,2873 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ollama 本地模型看板</title>
+<style>
+/* ============ 1. 设计 token ============ */
+:root{
+  --bg:#f5f8f8; --surface:#fff; --surface-2:#fafcfc; --surface-3:#f1f5f6;
+  --border:#e2e8ea; --border-strong:#cdd8db;
+  --text:#0f1f1e; --text-2:#46595c; --text-3:#849699;
+  --accent:#0d9488; --accent-2:#14b8a6; --accent-ink:#0b5f57; --accent-soft:#e4f5f2;
+  --amber:#c2760a; --amber-soft:#fdf3e3;
+  --danger:#d92d20; --danger-soft:#fdeceb; --danger-ink:#8a1c14;
+  --ok:#0d9488; --warn:#c2760a; --idle:#849699;
+  --bench:#4f46e5; --bench-soft:#eceafe;
+  /* 显存专用色（与榜单青绿、实测靛蓝都区分开，用紫色系） */
+  --vram:#7c3aed; --vram-soft:#f1eafe; --vram-ink:#5b21b6;
+  --r-sm:8px; --r:12px; --r-lg:18px; --r-pill:999px;
+  --sh-1:0 1px 2px rgba(15,31,30,.05);
+  --sh-2:0 2px 4px rgba(15,31,30,.05),0 8px 24px rgba(15,31,30,.06);
+  --sh-3:0 12px 48px rgba(15,31,30,.16);
+  --fs-xs:12px; --fs-sm:13.5px; --fs-md:15px; --fs-lg:17px; --fs-xl:21px;
+  --fs-2xl:27px; --fs-3xl:34px; --fs-4xl:44px;
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--s7:48px;
+  --font:"Segoe UI Variable Display","Segoe UI",system-ui,-apple-system,"Microsoft YaHei UI","Microsoft YaHei",sans-serif;
+  --mono:"Cascadia Code",Consolas,"SF Mono",ui-monospace,monospace;
+  --ease:cubic-bezier(.22,.61,.36,1);
+  --dur-1:140ms; --dur-2:240ms; --dur-3:420ms;
+  --fam-hue:172;
+}
+
+/* ============ 2. reset ============ */
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:var(--font); background:var(--bg); color:var(--text);
+  font-size:var(--fs-md); line-height:1.55;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+button,input,select{font-family:inherit;font-size:inherit;color:inherit}
+button{cursor:pointer;border:none;background:none}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#d5dfe1;border-radius:99px;border:2px solid var(--bg)}
+::-webkit-scrollbar-thumb:hover{background:#bccacc}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+
+/* ============ 3. 布局 ============ */
+.app{min-height:100dvh;display:flex;flex-direction:column}
+.hd{
+  position:sticky;top:0;z-index:40;background:rgba(255,255,255,.88);
+  backdrop-filter:blur(14px) saturate(1.4);
+  border-bottom:1px solid var(--border);
+}
+.hd-in{max-width:1560px;margin:0 auto;padding:var(--s3) var(--s5);
+  display:flex;align-items:center;gap:var(--s4)}
+.brand{display:flex;align-items:center;gap:var(--s3);min-width:0}
+.brand-mk{
+  width:40px;height:40px;border-radius:11px;flex:none;
+  background:linear-gradient(140deg,var(--accent) 0%,#0f766e 55%,#134e4a 100%);
+  display:grid;place-items:center;box-shadow:0 2px 10px rgba(13,148,136,.28);
+}
+.brand-mk svg{width:22px;height:22px;fill:#fff}
+.brand h1{margin:0;font-size:var(--fs-xl);font-weight:650;letter-spacing:-.02em;line-height:1.15}
+.brand .sub{margin:0;font-size:var(--fs-xs);color:var(--text-3);letter-spacing:.02em}
+.hd-sp{margin-left:auto;display:flex;align-items:center;gap:var(--s2)}
+
+/* 状态胶囊 */
+.pill{
+  display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 var(--s3);
+  border-radius:var(--r-pill);font-size:var(--fs-sm);font-weight:550;
+  background:var(--surface-3);border:1px solid var(--border);color:var(--text-2);
+  white-space:nowrap;transition:all var(--dur-1) var(--ease);
+}
+.pill .dot{width:7px;height:7px;border-radius:50%;background:var(--idle);flex:none}
+.pill.ok{background:var(--accent-soft);border-color:#b9e3dc;color:var(--accent-ink)}
+.pill.ok .dot{background:var(--ok);box-shadow:0 0 0 3px rgba(13,148,136,.16)}
+.pill.warn{background:var(--amber-soft);border-color:#f2ddb8;color:#8a5407}
+.pill.warn .dot{background:var(--warn);box-shadow:0 0 0 3px rgba(194,118,10,.16)}
+.pill.err{background:var(--danger-soft);border-color:#f7cfcb;color:var(--danger-ink)}
+.pill.err .dot{background:var(--danger);box-shadow:0 0 0 3px rgba(217,45,32,.16)}
+.pill.act{cursor:pointer}
+.pill.act:hover{transform:translateY(-1px);box-shadow:var(--sh-1)}
+
+/* 按钮 */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  height:34px;padding:0 var(--s3);border-radius:var(--r-sm);
+  font-size:var(--fs-sm);font-weight:550;background:var(--surface);
+  border:1px solid var(--border-strong);color:var(--text-2);
+  transition:all var(--dur-1) var(--ease);white-space:nowrap;
+}
+.btn:hover{background:var(--surface-3);color:var(--text);border-color:#b6c6c9}
+.btn:active{transform:translateY(1px)}
+.btn svg{width:15px;height:15px;flex:none}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.pri:hover{background:#0b8078;border-color:#0b8078;color:#fff}
+.btn.dgr{background:var(--danger-soft);border-color:#f3c3bd;color:var(--danger-ink)}
+.btn.dgr:hover{background:#fbdedb;border-color:#eaa9a0;color:var(--danger-ink)}
+.btn.dgr.solid{background:var(--danger);border-color:var(--danger);color:#fff}
+.btn.dgr.solid:hover{background:#bd271c;border-color:#bd271c;color:#fff}
+.btn.gho{border-color:transparent;background:transparent}
+.btn.gho:hover{background:var(--surface-3)}
+.btn[disabled]{opacity:.45;cursor:not-allowed;transform:none!important}
+.btn.sm{height:28px;padding:0 10px;font-size:var(--fs-xs);border-radius:7px}
+.btn.sm svg{width:13px;height:13px}
+.btn.icon{width:34px;padding:0}
+.btn.icon.sm{width:28px}
+
+/* 分段控件 */
+.seg{display:inline-flex;padding:3px;gap:2px;background:var(--surface-3);
+  border:1px solid var(--border);border-radius:var(--r-sm)}
+.seg button{
+  height:26px;padding:0 11px;border-radius:6px;font-size:var(--fs-xs);font-weight:550;
+  color:var(--text-3);display:inline-flex;align-items:center;gap:5px;
+  transition:all var(--dur-1) var(--ease);
+}
+.seg button svg{width:14px;height:14px}
+.seg button:hover{color:var(--text-2)}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--accent-ink);
+  box-shadow:var(--sh-1)}
+@media (prefers-reduced-motion:no-preference){
+  .seg button[aria-pressed="true"]{animation:segpop var(--dur-1) var(--ease)}
+}
+@keyframes segpop{from{transform:scale(.96)}to{transform:scale(1)}}
+
+/* ============ 4. 统计条 ============ */
+.wrap{max-width:1560px;margin:0 auto;padding:0 var(--s5);width:100%}
+.statbar{padding:var(--s5) 0 var(--s4)}
+.stats{display:grid;grid-template-columns:1.5fr repeat(5,1fr);gap:var(--s3);margin-bottom:var(--s4)}
+@media (max-width:1400px){.stats{grid-template-columns:1.4fr repeat(3,1fr)}}
+@media (max-width:1080px){.stats{grid-template-columns:1fr 1fr 1fr}}
+@media (max-width:720px){.stats{grid-template-columns:1fr 1fr}}
+.card{
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
+  padding:var(--s4);box-shadow:var(--sh-1);
+  transition:box-shadow var(--dur-2) var(--ease),transform var(--dur-2) var(--ease);
+}
+.card.lead{background:linear-gradient(150deg,#fff 0%,#f0faf8 100%);border-color:#cde7e2}
+.stat-lb{font-size:var(--fs-xs);color:var(--text-3);font-weight:550;letter-spacing:.04em;
+  text-transform:uppercase;display:flex;align-items:center;gap:6px}
+.stat-vl{font-size:var(--fs-2xl);font-weight:680;letter-spacing:-.03em;line-height:1.15;margin-top:6px}
+.card.lead .stat-vl{font-size:var(--fs-4xl)}
+.stat-sb{font-size:var(--fs-sm);color:var(--text-3);margin-top:3px}
+.stat-ic{width:15px;height:15px;flex:none}
+.stat-vl.bench{color:var(--bench)}
+.stat-vl.acc{color:var(--accent)}
+.card.vram{border-color:#ddd6fe;background:linear-gradient(150deg,#fff,#faf7ff)}
+.stat-vl.vram-c{color:var(--vram)}
+.card.vram:hover{box-shadow:var(--sh-2);transform:translateY(-1px)}
+.card[style*="cursor"]{transition:box-shadow var(--dur-2) var(--ease),transform var(--dur-2) var(--ease)}
+
+/* 占比堆叠条 */
+.sharebar-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
+  padding:var(--s4) var(--s4) var(--s3);box-shadow:var(--sh-1)}
+.sb-hd{display:flex;align-items:baseline;gap:var(--s2);margin-bottom:10px}
+.sb-hd h3{margin:0;font-size:var(--fs-md);font-weight:600}
+.sb-hd .hint{font-size:var(--fs-xs);color:var(--text-3);margin-left:auto}
+.sb-track{display:flex;gap:2px;height:26px;border-radius:7px;overflow:hidden;background:var(--surface-3)}
+.sb-seg{
+  min-width:3px;position:relative;cursor:pointer;
+  transition:filter var(--dur-1) var(--ease),transform var(--dur-2) var(--ease);
+  transform-origin:bottom;
+}
+.sb-seg:hover{filter:brightness(1.12) saturate(1.15)}
+.sb-seg:active{transform:scaleY(.88)}
+.sb-seg.sel{outline:2px solid var(--text);outline-offset:-2px;z-index:2}
+.sb-lg{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s4);margin-top:10px}
+.sb-item{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--text-2)}
+.sb-sw{width:9px;height:9px;border-radius:3px;flex:none}
+
+/* ============ 5. 筛选栏 ============ */
+.fbar{
+  position:sticky;top:61px;z-index:30;background:rgba(245,248,248,.93);
+  backdrop-filter:blur(12px);border-bottom:1px solid var(--border);
+}
+.fbar-in{max-width:1560px;margin:0 auto;padding:var(--s3) var(--s5);
+  display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
+.search{position:relative;flex:1 1 250px;max-width:340px;min-width:190px}
+.search svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);
+  width:15px;height:15px;color:var(--text-3);pointer-events:none}
+.search input{
+  width:100%;height:34px;padding:0 30px 0 32px;border-radius:var(--r-sm);
+  background:var(--surface);border:1px solid var(--border-strong);
+  font-size:var(--fs-sm);transition:all var(--dur-1) var(--ease);
+}
+.search input::placeholder{color:var(--text-3)}
+.search input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.search .clr{
+  position:absolute;right:6px;top:50%;transform:translateY(-50%);
+  width:20px;height:20px;border-radius:5px;display:none;place-items:center;color:var(--text-3);
+}
+.search .clr:hover{background:var(--surface-3);color:var(--text)}
+.search.has .clr{display:grid}
+.chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.chip{
+  height:28px;padding:0 11px;border-radius:var(--r-pill);font-size:var(--fs-xs);font-weight:550;
+  background:var(--surface);border:1px solid var(--border-strong);color:var(--text-2);
+  display:inline-flex;align-items:center;gap:5px;
+  transition:all var(--dur-1) var(--ease);
+}
+.chip:hover{border-color:#a9bcc0;background:var(--surface-2)}
+.chip[aria-pressed="true"]{background:var(--accent-soft);border-color:#8ed5cb;color:var(--accent-ink)}
+.chip .x{width:12px;height:12px;opacity:.6}
+.fbar-sp{margin-left:auto;display:flex;align-items:center;gap:var(--s2)}
+.fcount{font-size:var(--fs-xs);color:var(--text-3);white-space:nowrap}
+.fcount b{color:var(--accent-ink);font-family:var(--mono)}
+
+/* ============ 6. 内容区 ============ */
+.content{flex:1;max-width:1560px;margin:0 auto;padding:var(--s4) var(--s5) var(--s7);width:100%}
+
+/* 表格 */
+.tbl-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
+  box-shadow:var(--sh-1);overflow:hidden}
+.tbl-scroll{overflow-x:auto}
+table{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-sm)}
+thead th{
+  position:sticky;top:0;z-index:5;background:var(--surface-2);
+  text-align:left;font-weight:600;font-size:var(--fs-xs);color:var(--text-2);
+  padding:9px var(--s3);border-bottom:1px solid var(--border);white-space:nowrap;
+  letter-spacing:.02em;user-select:none;
+}
+thead th.grp{text-align:center;background:var(--surface-3);font-size:10.5px;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);padding:6px var(--s3)}
+thead tr.g-rw th.grp.bench{color:var(--bench);background:#f0eefc}
+thead tr.g-rw th.grp.vram{color:var(--vram-ink);background:var(--vram-soft)}
+thead tr.rw th{position:sticky}
+th.srt{cursor:pointer;transition:color var(--dur-1) var(--ease),background var(--dur-1) var(--ease)}
+th.srt:hover{color:var(--text);background:var(--surface-3)}
+th .ar{display:inline-block;width:10px;margin-left:3px;opacity:.35;font-size:9px;vertical-align:1px}
+th.srt.act .ar{opacity:1;color:var(--accent)}
+th.srt.act{color:var(--accent-ink)}
+tbody td{padding:10px var(--s3);border-bottom:1px solid var(--border);vertical-align:middle}
+tbody tr{transition:background var(--dur-1) var(--ease);position:relative}
+tbody tr:hover{background:var(--surface-2)}
+tbody tr:last-child td{border-bottom:none}
+td.nw,th.nw{white-space:nowrap}
+tr.new{animation:enter var(--dur-3) var(--ease)}
+@keyframes enter{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+tr.meta-warn td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
+
+/* 模型名单元 */
+.nm{display:flex;flex-direction:column;gap:1px;min-width:0}
+.nm a,.nm .t{font-weight:600;font-size:var(--fs-md);color:var(--text);
+  display:flex;align-items:center;gap:6px;cursor:pointer}
+.nm a:hover{color:var(--accent);text-decoration:none}
+.nm .b{font-size:var(--fs-xs);color:var(--text-3);font-family:var(--mono);
+  overflow:hidden;text-overflow:ellipsis}
+.resid{width:6px;height:6px;border-radius:50%;background:var(--accent);flex:none;
+  box-shadow:0 0 0 2.5px var(--accent-soft)}
+
+/* 徽章 */
+.bg{
+  display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;
+  border-radius:6px;font-size:11px;font-weight:600;letter-spacing:.01em;
+  background:var(--surface-3);color:var(--text-2);border:1px solid var(--border);
+  font-family:var(--mono);white-space:nowrap;
+}
+.bg.moe{background:var(--amber-soft);border-color:#f0dbb4;color:#8a5407;font-family:var(--font)}
+.bg.emb{background:#e9f0fe;border-color:#ccdcf8;color:#1a4c9c;font-family:var(--font)}
+.bg.rev{background:#f3ecfd;border-color:#dfd0f5;color:#5b2ea6;font-family:var(--font)}
+.bg.sm{height:18px;padding:0 6px;font-size:10px}
+
+/* 尺寸单元 */
+.sz{display:flex;flex-direction:column;gap:4px;min-width:96px}
+.sz-v{font-family:var(--mono);font-weight:600;font-size:var(--fs-sm)}
+.sz-b{height:3px;border-radius:2px;background:var(--surface-3);overflow:hidden;width:100%}
+.sz-b i{display:block;height:100%;background:linear-gradient(90deg,var(--accent-2),var(--accent));
+  border-radius:2px;transition:width var(--dur-3) var(--ease)}
+.sz-s{font-size:10.5px;color:var(--text-3);font-family:var(--mono)}
+
+/* benchmark 单元 */
+.bk{display:flex;flex-direction:column;gap:3px;min-width:112px}
+.bk-t{font-size:10.5px;color:var(--text-3);font-weight:600;letter-spacing:.03em}
+.bk-r{display:flex;align-items:baseline;gap:5px}
+.bk-n{font-family:var(--mono);font-weight:650;font-size:var(--fs-md);color:var(--accent-ink)}
+.bk-u{font-size:10.5px;color:var(--text-3)}
+.bk-none{
+  display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:6px;
+  font-size:11px;color:var(--idle);font-weight:550;
+  background:repeating-linear-gradient(135deg,#f4f7f8,#f4f7f8 5px,#eef2f3 5px,#eef2f3 10px);
+  border:1px dashed #d5dfe1;
+}
+.bk-fz{display:inline-flex;align-items:center;height:15px;padding:0 5px;border-radius:4px;
+  font-size:9.5px;font-weight:650;background:var(--amber-soft);color:#8a5407;
+  border:1px solid #f0dbb4;letter-spacing:.02em}
+.bk-2nd{font-size:10.5px;color:var(--text-3);font-family:var(--mono)}
+
+/* 实测单元（靛蓝系，与榜单青绿系严格区分） */
+.bm{display:flex;flex-direction:column;gap:3px;min-width:78px}
+.bm-n{font-family:var(--mono);font-weight:650;font-size:var(--fs-md);color:var(--bench)}
+.bm-u{font-size:10.5px;color:var(--text-3)}
+.bm-none{font-size:11px;color:var(--idle);font-weight:500}
+.bm-run{font-size:10.5px;color:var(--bench);font-family:var(--mono)}
+.bm-think{display:inline-flex;align-items:center;height:14px;padding:0 4px;border-radius:3px;
+  font-size:9px;font-weight:600;background:var(--bench-soft);color:var(--bench);margin-left:4px}
+
+/* 显存需求单元（紫色系，与榜单/实测区分） */
+.vr{display:flex;flex-direction:column;gap:3px;min-width:112px}
+.vr-n{font-family:var(--mono);font-weight:650;font-size:var(--fs-md);color:var(--vram-ink)}
+.vr-u{font-size:10.5px;color:var(--text-3);font-family:var(--mono)}
+.vr-bar{height:3px;border-radius:2px;background:var(--surface-3);overflow:hidden;margin:2px 0}
+.vr-bar i{display:block;height:100%;border-radius:2px;transition:width var(--dur-3) var(--ease)}
+.vr-bar i.ok{background:var(--ok)}
+.vr-bar i.warn{background:var(--warn)}
+.vr-bar i.dgr{background:var(--danger)}
+.vr-bar i.none{background:var(--idle)}
+.vr-ov{font-size:10.5px;color:var(--danger-ink);font-weight:600}
+
+/* 适配徽章 */
+.fit{display:inline-flex;align-items:center;gap:4px;height:21px;padding:0 8px;
+  border-radius:6px;font-size:11px;font-weight:650;white-space:nowrap;letter-spacing:.01em}
+.fit.ok{background:var(--accent-soft);color:var(--accent-ink);border:1px solid #b9e3dc}
+.fit.warn{background:var(--amber-soft);color:#8a5407;border:1px solid #f0dbb4}
+.fit.dgr{background:var(--danger-soft);color:var(--danger-ink);border:1px solid #f7cfcb}
+.fit.none{background:var(--surface-3);color:var(--idle);border:1px solid var(--border)}
+.fit i{width:6px;height:6px;border-radius:50%;flex:none}
+.fit.ok i{background:var(--ok)}
+.fit.warn i{background:var(--warn)}
+.fit.dgr i{background:var(--danger)}
+.fit.none i{background:var(--idle)}
+
+/* 上下文影响迷你条形图 */
+.ctxbars{display:flex;flex-direction:column;gap:5px;margin-top:4px}
+.ctxbar{display:flex;align-items:center;gap:8px;font-size:11px}
+.ctxbar .ck{width:38px;flex:none;color:var(--text-3);font-family:var(--mono);font-size:10.5px}
+.ctxbar .ct{flex:1;height:8px;background:var(--surface-3);border-radius:4px;overflow:hidden;position:relative}
+.ctxbar .ct i{display:block;height:100%;border-radius:4px;background:var(--vram);
+  opacity:.55;transition:width var(--dur-3) var(--ease)}
+.ctxbar.over .ct i{background:var(--danger);opacity:.8}
+.ctxbar .cv{width:62px;flex:none;text-align:right;font-family:var(--mono);font-size:10.5px;
+  color:var(--text-2)}
+.ctxbar.cur .ck{color:var(--vram-ink);font-weight:700}
+.ctxbar.cur .ct{outline:1.5px solid var(--vram);outline-offset:-1.5px}
+.ctxbar.cur .ct i{opacity:1}
+.ctxlegend{font-size:11px;color:var(--text-3);margin-top:8px;line-height:1.55}
+
+/* 显存构成条 */
+.vrcomp{display:flex;height:22px;border-radius:6px;overflow:hidden;gap:1px;
+  background:var(--surface-3);margin-bottom:10px}
+.vrcomp i{display:block;height:100%;transition:filter var(--dur-1)}
+.vrcomp i:hover{filter:brightness(1.15)}
+.vrcomp .w{background:var(--vram)}
+.vrcomp .k{background:#a78bfa}
+.vrcomp .o{background:#ddd6fe}
+.vrcomp-lg{display:flex;flex-wrap:wrap;gap:var(--s2)}
+.vrcomp-lg span{display:inline-flex;align-items:center;gap:5px;font-size:var(--fs-xs);
+  color:var(--text-2);font-family:var(--mono)}
+.vrcomp-lg b{width:9px;height:9px;border-radius:3px;flex:none}
+.vrcomp-lg b.w{background:var(--vram)}
+.vrcomp-lg b.k{background:#a78bfa}
+.vrcomp-lg b.o{background:#ddd6fe}
+
+/* 行操作 */
+.acts{display:flex;gap:3px;justify-content:flex-end;opacity:.35;transition:opacity var(--dur-1)}
+tr:hover .acts,tr:focus-within .acts{opacity:1}
+
+/* 卡片视图 */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:var(--s3)}
+.mc{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
+  padding:var(--s4);box-shadow:var(--sh-1);position:relative;overflow:hidden;
+  transition:box-shadow var(--dur-2) var(--ease),transform var(--dur-2) var(--ease)}
+.mc::before{content:"";position:absolute;inset:0 auto 0 0;width:3px;
+  background:hsl(var(--fam-hue) 55% 52%)}
+.mc:hover{box-shadow:var(--sh-2);transform:translateY(-2px)}
+.mc.new{animation:enter var(--dur-3) var(--ease)}
+.mc-t{display:flex;align-items:flex-start;gap:var(--s2);margin-bottom:10px}
+.mc-t .nm{flex:1;min-width:0}
+.mc-t .acts{opacity:0}
+.mc:hover .mc-t .acts,.mc:focus-within .mc-t .acts{opacity:1}
+.mc-sz{display:flex;align-items:baseline;gap:8px;margin-bottom:8px}
+.mc-sz .big{font-size:var(--fs-2xl);font-weight:680;letter-spacing:-.03em;font-family:var(--mono)}
+.mc-sz .pc{font-size:var(--fs-sm);color:var(--accent-ink);font-weight:600;font-family:var(--mono)}
+.mc-sz .tag{font-size:10.5px;color:var(--text-3);margin-left:auto;font-family:var(--mono)}
+.mc-bar{height:4px;border-radius:2px;background:var(--surface-3);overflow:hidden;margin-bottom:12px}
+.mc-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent-2),var(--accent))}
+.mc-g{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding-top:12px;border-top:1px solid var(--border)}
+.mc-col{display:flex;flex-direction:column;gap:5px;min-width:0}
+.mc-col>.bd-l{font-size:9.5px;color:var(--text-3);font-weight:650;letter-spacing:.05em;
+  text-transform:uppercase}
+.mc-col.b .bd-l{color:var(--bench)}
+.mc-col.g .bd-l{color:var(--accent-ink)}
+.mc-r{display:flex;align-items:baseline;gap:4px}
+.mc-r b{font-family:var(--mono);font-weight:650;font-size:var(--fs-md)}
+.mc-col.g .mc-r b{color:var(--accent-ink)}
+.mc-col.b .mc-r b{color:var(--bench)}
+.mc-r span{font-size:10.5px;color:var(--text-3)}
+.mc-tags{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;min-height:20px}
+
+/* 空态 */
+.empty{padding:var(--s7) var(--s5);text-align:center;color:var(--text-3)}
+.empty svg{width:44px;height:44px;opacity:.3;margin-bottom:var(--s3)}
+.empty h3{margin:0 0 6px;font-size:var(--fs-lg);color:var(--text-2);font-weight:600}
+.empty p{margin:0 0 var(--s4);font-size:var(--fs-sm)}
+
+/* ============ 7. 抽屉 ============ */
+.scrim{
+  position:fixed;inset:0;background:rgba(15,31,30,.32);backdrop-filter:blur(2px);
+  z-index:60;opacity:0;pointer-events:none;transition:opacity var(--dur-2) var(--ease);
+}
+.scrim.on{opacity:1;pointer-events:auto}
+.drawer{
+  position:fixed;top:0;right:0;bottom:0;width:min(560px,100vw);z-index:70;
+  background:var(--surface);border-left:1px solid var(--border);box-shadow:var(--sh-3);
+  display:flex;flex-direction:column;transform:translateX(100%);
+  transition:transform var(--dur-3) var(--ease);
+}
+.drawer.on{transform:none}
+.dr-hd{padding:var(--s4) var(--s5) var(--s3);border-bottom:1px solid var(--border);
+  display:flex;align-items:flex-start;gap:var(--s3)}
+.dr-hd .nm{flex:1;min-width:0}
+.dr-bd{flex:1;overflow-y:auto;padding:var(--s4) var(--s5) var(--s6)}
+.sec{margin-bottom:var(--s5)}
+.sec-t{font-size:var(--fs-xs);color:var(--text-3);font-weight:650;letter-spacing:.07em;
+  text-transform:uppercase;margin-bottom:10px;display:flex;align-items:center;gap:7px}
+.sec-t::after{content:"";flex:1;height:1px;background:var(--border)}
+.kv{display:grid;grid-template-columns:132px 1fr;gap:1px;background:var(--border);
+  border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden}
+@media (max-width:520px){.kv{grid-template-columns:110px 1fr}}
+.kv dt{background:var(--surface-2);padding:8px var(--s3);font-size:var(--fs-xs);
+  color:var(--text-2);font-weight:550}
+.kv dd{background:var(--surface);padding:8px var(--s3);margin:0;font-size:var(--fs-sm);
+  font-family:var(--mono);font-variant-numeric:tabular-nums;word-break:break-all}
+.kv dd.txt{font-family:var(--font);word-break:normal}
+.kv dd.na{color:var(--idle);font-family:var(--font)}
+.kv dd .u{color:var(--text-3);font-size:var(--fs-xs);margin-left:3px;font-family:var(--font)}
+
+/* 量化分布 */
+.qmix{display:flex;height:22px;border-radius:6px;overflow:hidden;background:var(--surface-3);
+  gap:1px;margin-bottom:10px}
+.qmix i{display:block;height:100%;transition:filter var(--dur-1)}
+.qmix i:hover{filter:brightness(1.15)}
+.qlg{display:flex;flex-wrap:wrap;gap:var(--s2)}
+.qlg span{display:inline-flex;align-items:center;gap:5px;font-size:var(--fs-xs);
+  color:var(--text-2);font-family:var(--mono)}
+.qlg b{width:9px;height:9px;border-radius:3px;flex:none}
+
+/* 许可证 */
+.lic{max-height:82px;overflow:hidden;position:relative;transition:max-height var(--dur-3) var(--ease)}
+.lic.open{max-height:none}
+.lic:not(.open)::after{
+  content:"";position:absolute;inset:auto 0 0 0;height:46px;
+  background:linear-gradient(180deg,rgba(255,255,255,0),var(--surface) 78%);
+}
+.lic-txt{margin:0;padding:var(--s3);background:var(--surface-2);border:1px solid var(--border);
+  border-radius:var(--r-sm);font-family:var(--mono);font-size:11.5px;line-height:1.65;
+  white-space:pre-wrap;word-break:break-word;max-height:340px;overflow:auto;color:var(--text-2)}
+.lic-btns{display:flex;gap:6px;margin-top:8px}
+
+/* 能力标签 */
+.caps{display:flex;flex-wrap:wrap;gap:5px}
+.cap{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:6px;
+  font-size:var(--fs-xs);font-weight:600;background:var(--accent-soft);color:var(--accent-ink);
+  border:1px solid #b9e3dc}
+.cap.rev{background:#f3ecfd;border-color:#dfd0f5;color:#5b2ea6}
+.cap svg{width:12px;height:12px}
+
+/* benchmark 详情表 */
+.bkd{width:100%;font-size:var(--fs-sm);border-collapse:collapse}
+.bkd th{text-align:left;font-size:10.5px;color:var(--text-3);font-weight:650;letter-spacing:.05em;
+  text-transform:uppercase;padding:0 0 7px;border-bottom:1px solid var(--border)}
+.bkd th.r,.bkd td.r{text-align:right}
+.bkd td{padding:6px 0;border-bottom:1px solid var(--border);font-family:var(--mono);
+  font-variant-numeric:tabular-nums}
+.bkd tr:last-child td{border-bottom:none}
+.bkd td.na{color:var(--idle);font-family:var(--font);font-size:var(--fs-xs)}
+.bkgrp{margin-bottom:var(--s4)}
+.bkgrp-t{font-size:var(--fs-xs);font-weight:650;color:var(--accent-ink);margin-bottom:7px;
+  display:flex;align-items:center;gap:6px}
+.bk-src{font-size:var(--fs-xs);color:var(--text-3);margin-top:var(--s2);line-height:1.6}
+.bk-src a{word-break:break-all}
+.bk-note{font-size:11.5px;color:var(--text-2);background:var(--amber-soft);border:1px solid #f0dbb4;
+  border-radius:var(--r-sm);padding:9px 11px;margin-top:var(--s2);line-height:1.65}
+.bk-note.warn{background:var(--danger-soft);border-color:#f7cfcb;color:var(--danger-ink)}
+
+/* 错误分区 */
+.sec-err{background:var(--danger-soft);border:1px solid #f7cfcb;border-radius:var(--r-sm);
+  padding:var(--s3);font-size:var(--fs-sm);color:var(--danger-ink);
+  display:flex;align-items:center;gap:var(--s2)}
+.sec-err svg{width:16px;height:16px;flex:none}
+
+/* ============ 8. 模态框 ============ */
+.mroot{position:fixed;inset:0;z-index:80;display:grid;place-items:center;padding:var(--s4);
+  background:rgba(15,31,30,.42);backdrop-filter:blur(3px);
+  opacity:0;pointer-events:none;transition:opacity var(--dur-2) var(--ease)}
+.mroot.on{opacity:1;pointer-events:auto}
+.modal{
+  width:min(520px,100%);max-height:88dvh;background:var(--surface);border-radius:var(--r-lg);
+  box-shadow:var(--sh-3);display:flex;flex-direction:column;overflow:hidden;
+  transform:translateY(14px) scale(.98);transition:transform var(--dur-2) var(--ease);
+}
+.mroot.on .modal{transform:none}
+.mo-hd{padding:var(--s4) var(--s5) var(--s3);display:flex;align-items:flex-start;gap:var(--s3)}
+.mo-hd .mi{width:38px;height:38px;border-radius:10px;flex:none;display:grid;place-items:center}
+.mo-hd .mi svg{width:20px;height:20px}
+.mo-hd.dgr .mi{background:var(--danger-soft);color:var(--danger)}
+.mo-hd.acc .mi{background:var(--accent-soft);color:var(--accent-ink)}
+.mo-hd h2{margin:0;font-size:var(--fs-lg);font-weight:650;letter-spacing:-.01em}
+.mo-hd p{margin:3px 0 0;font-size:var(--fs-sm);color:var(--text-3);line-height:1.5}
+.mo-bd{padding:0 var(--s5) var(--s4);overflow-y:auto;flex:1}
+.mo-ft{padding:var(--s3) var(--s5) var(--s4);display:flex;gap:var(--s2);justify-content:flex-end;
+  border-top:1px solid var(--border);background:var(--surface-2)}
+.warnbox{display:flex;gap:10px;padding:var(--s3);border-radius:var(--r-sm);
+  background:var(--danger-soft);border:1px solid #f7cfcb;margin-bottom:var(--s3)}
+.warnbox svg{width:17px;height:17px;flex:none;color:var(--danger);margin-top:1px}
+.warnbox div{font-size:var(--fs-sm);color:var(--danger-ink);line-height:1.6}
+.warnbox b{font-weight:650}
+.warnbox.acc{background:var(--accent-soft);border-color:#b9e3dc}
+.warnbox.acc svg{color:var(--accent)}
+.warnbox.acc div{color:var(--accent-ink)}
+
+.fld{margin-top:var(--s3)}
+.fld label{display:block;font-size:var(--fs-xs);color:var(--text-2);font-weight:600;margin-bottom:5px}
+.fld input,.fld textarea{
+  width:100%;height:36px;padding:0 11px;border-radius:var(--r-sm);background:var(--surface);
+  border:1px solid var(--border-strong);font-size:var(--fs-sm);font-family:var(--mono);
+  transition:all var(--dur-1) var(--ease);
+}
+.fld textarea{height:auto;padding:9px 11px;resize:vertical;min-height:64px}
+.fld input:focus,.fld textarea:focus{outline:none;border-color:var(--accent);
+  box-shadow:0 0 0 3px var(--accent-soft)}
+.fld .hint{font-size:11.5px;color:var(--text-3);margin-top:5px;line-height:1.55}
+.sugg{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+.sugg button{height:26px;padding:0 9px;border-radius:var(--r-pill);font-size:11.5px;
+  background:var(--surface-3);border:1px solid var(--border);color:var(--text-2);
+  font-family:var(--mono);transition:all var(--dur-1)}
+.sugg button:hover{background:var(--accent-soft);border-color:#8ed5cb;color:var(--accent-ink)}
+
+/* 进度 */
+.prog{margin-top:var(--s3)}
+.pr-top{display:flex;align-items:baseline;gap:var(--s2);margin-bottom:7px}
+.pr-top .st{font-size:var(--fs-sm);font-weight:600}
+.pr-top .pc{margin-left:auto;font-family:var(--mono);font-weight:650;color:var(--accent-ink)}
+.pr-track{height:9px;border-radius:5px;background:var(--surface-3);overflow:hidden}
+.pr-fill{height:100%;width:0;border-radius:5px;
+  background:linear-gradient(90deg,var(--accent-2),var(--accent));
+  transition:width var(--dur-2) var(--ease)}
+.pr-fill.ind{width:100%!important;
+  background:repeating-linear-gradient(45deg,var(--accent-soft),var(--accent-soft) 9px,#d3ece8 9px,#d3ece8 18px);
+  background-size:26px 100%;animation:flow 900ms linear infinite}
+@keyframes flow{to{background-position:26px 0}}
+.pr-sub{font-size:11.5px;color:var(--text-3);margin-top:6px;font-family:var(--mono)}
+.pr-err{padding:10px 12px;border-radius:var(--r-sm);background:var(--danger-soft);
+  border:1px solid #f7cfcb;color:var(--danger-ink);font-size:var(--fs-sm);margin-top:var(--s3);
+  line-height:1.6}
+
+/* ============ 9. Toast ============ */
+.troot{position:fixed;right:var(--s5);bottom:var(--s5);z-index:90;
+  display:flex;flex-direction:column;gap:var(--s2);align-items:flex-end;pointer-events:none}
+.toast{
+  display:flex;align-items:flex-start;gap:9px;padding:11px var(--s4);
+  background:var(--surface);border:1px solid var(--border);border-left-width:3px;
+  border-radius:var(--r-sm);box-shadow:var(--sh-2);font-size:var(--fs-sm);
+  max-width:400px;pointer-events:auto;animation:tin var(--dur-2) var(--ease);
+}
+.toast.out{animation:tout var(--dur-2) var(--ease) forwards}
+@keyframes tin{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:none}}
+@keyframes tout{to{opacity:0;transform:translateX(20px)}}
+.toast svg{width:16px;height:16px;flex:none;margin-top:1px}
+.toast.ok{border-left-color:var(--ok)} .toast.ok svg{color:var(--ok)}
+.toast.err{border-left-color:var(--danger)} .toast.err svg{color:var(--danger)}
+.toast.warn{border-left-color:var(--warn)} .toast.warn svg{color:var(--warn)}
+.toast.info{border-left-color:var(--bench)} .toast.info svg{color:var(--bench)}
+.toast .tx{flex:1;min-width:0;line-height:1.55}
+.toast .tx b{display:block;font-weight:600;margin-bottom:1px}
+.toast .tx span{color:var(--text-3);font-size:var(--fs-xs);word-break:break-word}
+
+/* ============ 10. 全屏诊断页 ============ */
+.gate{
+  position:fixed;inset:0;z-index:100;background:var(--bg);
+  display:none;place-items:center;padding:var(--s5);overflow-y:auto;
+}
+.gate.on{display:grid}
+.gate-in{max-width:600px;width:100%;text-align:center;padding:var(--s5) 0}
+.gate-mk{width:60px;height:60px;border-radius:16px;margin:0 auto var(--s4);
+  display:grid;place-items:center;background:linear-gradient(140deg,var(--accent),#134e4a);
+  box-shadow:0 6px 22px rgba(13,148,136,.3)}
+.gate-mk svg{width:32px;height:32px;fill:#fff}
+.gate.err .gate-mk{background:linear-gradient(140deg,#f0665a,#a3231a)}
+.gate.warn .gate-mk{background:linear-gradient(140deg,#e0a03c,#a06a0d)}
+.gate h2{margin:0 0 8px;font-size:var(--fs-2xl);font-weight:680;letter-spacing:-.02em}
+.gate p{margin:0 auto var(--s5);font-size:var(--fs-md);color:var(--text-2);
+  max-width:470px;line-height:1.65}
+.gate-cards{display:grid;gap:var(--s3);text-align:left;margin-bottom:var(--s5)}
+.gate-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
+  padding:var(--s4);box-shadow:var(--sh-1)}
+.gate-card.best{border-color:#8ed5cb;background:linear-gradient(150deg,#fff,#f0faf8)}
+.gc-t{display:flex;align-items:center;gap:var(--s2);margin-bottom:7px}
+.gc-t h3{margin:0;font-size:var(--fs-md);font-weight:650}
+.gc-badge{height:20px;padding:0 8px;border-radius:var(--r-pill);font-size:10.5px;
+  font-weight:650;background:var(--accent);color:#fff}
+.gc-badge.alt{background:var(--surface-3);color:var(--text-3);border:1px solid var(--border)}
+.gc p{margin:0 0 10px;font-size:var(--fs-sm);color:var(--text-3);line-height:1.6;
+  max-width:none;text-align:left}
+.gc-cmd{
+  display:flex;align-items:flex-start;gap:8px;padding:9px 11px;background:#0f1f1e;
+  border-radius:var(--r-sm);margin-bottom:6px;
+}
+.gc-cmd code{flex:1;font-family:var(--mono);font-size:11.5px;color:#c8e6e0;
+  line-height:1.6;word-break:break-all;white-space:pre-wrap}
+.gc-cmd button{flex:none;width:24px;height:24px;border-radius:5px;color:#7fa8a3;
+  display:grid;place-items:center;transition:all var(--dur-1)}
+.gc-cmd button:hover{background:#1c3533;color:#c8e6e0}
+.gc-cmd svg{width:13px;height:13px}
+.gate-foot{display:flex;gap:var(--s2);justify-content:center;flex-wrap:wrap}
+.spin{width:15px;height:15px;border:2px solid var(--border);border-top-color:var(--accent);
+  border-radius:50%;animation:sp .7s linear infinite;display:inline-block;vertical-align:-3px}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+/* 加载骨架 */
+.sk{background:linear-gradient(90deg,#eef2f3,#f7fafa,#eef2f3);background-size:200% 100%;
+  animation:sh 1.3s linear infinite;border-radius:6px}
+@keyframes sh{to{background-position:-200% 0}}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;
+    transition-duration:.01ms!important}
+}
+@media print{.hd,.fbar,.acts,.fbar-sp{display:none}}
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+  <!-- 顶栏 -->
+  <header class="hd">
+    <div class="hd-in">
+      <div class="brand">
+        <div class="brand-mk" id="brandMk"></div>
+        <div>
+          <h1>Ollama 模型看板</h1>
+          <p class="sub" id="hdSub">本地已安装模型 · 体积 · 能力 · 实测速度</p>
+        </div>
+      </div>
+      <div class="hd-sp">
+        <span class="pill" id="connPill"><i class="dot"></i><span id="connTx">连接中…</span></span>
+        <div class="seg" role="group" aria-label="视图切换">
+          <button data-view="table" aria-pressed="true" title="表格视图"></button>
+          <button data-view="card" aria-pressed="false" title="卡片视图"></button>
+        </div>
+        <button class="btn icon" id="btnBench" title="批量实测"></button>
+        <button class="btn" id="btnPull" title="拉取新模型"></button>
+        <button class="btn icon" id="btnCfg" title="设置"></button>
+        <button class="btn icon" id="btnRefresh" title="刷新"></button>
+      </div>
+    </div>
+  </header>
+
+  <!-- 统计条 -->
+  <div class="statbar"><div class="wrap">
+    <div class="stats" id="stats"></div>
+    <div class="sharebar-wrap">
+      <div class="sb-hd">
+        <h3>磁盘占用分布</h3>
+        <span class="hint" id="sbHint">按模型体积 · 点击定位</span>
+      </div>
+      <div class="sb-track" id="sbTrack"></div>
+      <div class="sb-lg" id="sbLegend"></div>
+    </div>
+  </div></div>
+
+  <!-- 筛选栏 -->
+  <div class="fbar"><div class="fbar-in">
+    <div class="search" id="searchWrap">
+      <input type="search" id="q" placeholder="搜索模型名 / 家族 / 摘要…" autocomplete="off" spellcheck="false">
+      <button class="clr" id="qClr" title="清空"></button>
+    </div>
+    <div class="chips" id="chips"></div>
+    <div class="fbar-sp">
+      <span class="fcount" id="fcount"></span>
+      <button class="btn sm gho" id="btnReset" title="重置全部筛选"></button>
+    </div>
+  </div></div>
+
+  <!-- 内容 -->
+  <main class="content">
+    <div id="viewTable" class="tbl-wrap">
+      <div class="tbl-scroll"><table id="tbl"><thead></thead><tbody></tbody></table></div>
+    </div>
+    <div id="viewCard" class="cards" hidden></div>
+    <div class="empty" id="emptyBox" hidden></div>
+  </main>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true"></aside>
+<div class="mroot" id="mroot"></div>
+<div class="troot" id="troot"></div>
+<div class="gate" id="gate"></div>
+
+<script>
+"use strict";
+(function(){
+/* ==========================================================================
+   0. 内置数据：官方 benchmark
+   数据性质：来自各模型官方发布页 / 论文 / 官方模型卡。
+   verified=false 表示未找到可靠公开来源，UI 会明确标注「未收录」，不显示任何猜测值。
+   重要口径提醒（已核实，见各条 note）：
+   - base / instruct 分数不可混用，缺失即置 null
+   - MBPP 与 MBPP+ (EvalPlus) 是不同口径
+   - MATH-500 与 MATH 是不同基准
+   - LiveCodeBench 各家版本区间不同，横向比较需谨慎
+   ========================================================================== */
+const BENCHMARKS = {
+  meta:{
+    lastVerified:'2026-10-03',
+    note:'分数对应上游原始权重版本；本机为量化版本（Q4_K_M 等），实际表现可能存在差异，仅作横向参考。',
+    source:'各模型官方发布页 / 技术报告 / 官方模型卡',
+    warn:'不同来源的评测口径不完全一致，跨模型横向对比时需留意每项的具体基准定义。'
+  },
+  entries:[
+    {
+      key:'qwen2.5-coder-7b',
+      alias:['qwen2.5-coder:7b','qwen2.5-coder-7b','qwen2.5-coder-7b-instruct','qwen2.5-coder'],
+      displayName:'Qwen2.5-Coder 7B Instruct', org:'Alibaba', variant:'7B Instruct',
+      verified:true, contextLength:131072, license:'apache-2.0', isEmbedding:false,
+      scores:{
+        code:{ HumanEval:88.4, MBPP:83.5, LiveCodeBench:18.2, Aider:55.6 },
+        math:{ MATH:46.6, GSM8K:83.9 },
+        general:{ MMLU:67.6, 'MMLU-Pro':40.1, ArcC:60.9, HellaSwag:76.8, Winogrande:72.9, TruthfulQA:50.6 }
+      },
+      source:'https://qwenlm.github.io/blog/qwen2.5-coder/',
+      note:'MMLU / GSM8K / MMLU-Pro 三项在不同转载源中存在数值分歧（另有 68.7 / 66.8 / 45.6 的说法）。此处采用官方博客对应组，横向比较时请注意该口径差异。'
+    },
+    {
+      key:'qwen2.5-coder-1.5b',
+      alias:['qwen2.5-coder:1.5b','qwen2.5-coder-1.5b','qwen2.5-coder-1.5b-instruct'],
+      displayName:'Qwen2.5-Coder 1.5B Instruct', org:'Alibaba', variant:'1.5B Instruct',
+      verified:true, contextLength:32768, license:'apache-2.0', isEmbedding:false,
+      scores:{
+        code:{ HumanEval:70.7, MBPP:69.2, LiveCodeBench:15.7, Aider:30.1 },
+        math:{ MATH:null, GSM8K:null },
+        general:{ MMLU:null, 'MMLU-Pro':null, ArcC:null, HellaSwag:null, Winogrande:null, TruthfulQA:null }
+      },
+      source:'https://arxiv.org/html/2409.12186v1',
+      note:'代码分数取自 Qwen2.5-Coder 技术报告（HumanEval/MBPP 为非 EvalPlus 口径）。官方仅公布了 1.5B Base 版的数学与通用能力，Instruct 版无公开数值，故留空。'
+    },
+    {
+      key:'qwen3-coder-30b',
+      alias:['qwen3-coder:30b','qwen3-coder-30b','qwen3-coder-30b-a3b-instruct','qwen3-coder'],
+      displayName:'Qwen3-Coder 30B A3B Instruct', org:'Alibaba', variant:'30B-A3B Instruct',
+      verified:false, contextLength:262144, license:'apache-2.0', isEmbedding:false,
+      scores:{ code:{}, math:{}, general:{} },
+      source:'https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct',
+      note:'官方发布页的分数表以图片呈现，无法取得可引用的文本数值；第三方站点的数字无法回溯到官方页面，故不予收录。'
+    },
+    {
+      key:'gemma3-12b',
+      alias:['gemma3:12b','gemma3-12b','gemma-3-12b','gemma-3-12b-it','gemma3'],
+      displayName:'Gemma 3 12B IT', org:'Google DeepMind', variant:'12B IT',
+      verified:true, contextLength:131072, license:'gemma', isEmbedding:false,
+      scores:{
+        code:{ HumanEval:85.4, MBPP:73.0, LiveCodeBench:24.6, Aider:null },
+        math:{ MATH:83.8, GSM8K:94.4 },
+        general:{ MMLU:null, 'MMLU-Pro':60.6, ArcC:null, HellaSwag:null, Winogrande:null, TruthfulQA:null, GPQA:40.9 }
+      },
+      source:'https://ai.google.dev/gemma/docs/core/model_card_3',
+      note:'取自官方模型卡的 IT 指令版列。官方仅对 PT 基座版给出 MMLU / HellaSwag / ARC-c / WinoGrande，指令版未公布，故留空而不以基座版数值代填。'
+    },
+    {
+      key:'gemma4-26b',
+      alias:['gemma4:26b','gemma4-26b','gemma-4-26b','gemma-4-26b-a4b','gemma-4-26b-a4b-it','gemma4'],
+      displayName:'Gemma 4 26B A4B', org:'Google DeepMind', variant:'26B-A4B IT（MoE）',
+      verified:true, contextLength:262144, license:'apache-2.0', isEmbedding:false,
+      scores:{
+        code:{ HumanEval:null, MBPP:null, LiveCodeBench:77.1, Aider:null },
+        math:{ MATH:null, GSM8K:null },
+        general:{ MMLU:null, 'MMLU-Pro':82.6, ArcC:null, HellaSwag:null, Winogrande:null, TruthfulQA:null, GPQA:82.3 }
+      },
+      source:'https://ai.google.dev/gemma/docs/core/model_card_4',
+      note:'MoE 架构（25.2B 总参 / 3.8B 激活）。LiveCodeBench 为 v6 口径，与其他模型的 2024 版不可直接对比。官方另公布 AIME 2026 = 88.3。'
+    },
+    {
+      key:'gemma-4-31b-crack',
+      alias:['gemma-4-31b-crack','gemma4-crack','gemma-4-31b-jang_4m-crack','gemma4:31b','gemma4-31b'],
+      displayName:'Gemma 4 31B（社区 CRACK 版）', org:'社区（非官方）', variant:'31B Dense IT + CRACK',
+      verified:false, contextLength:262144, license:'gemma', isEmbedding:false,
+      scores:{ code:{}, math:{}, general:{} },
+      source:'https://huggingface.co/ufo001jone/Gemma-4-31B-JANG_4M-CRACK-GGUF',
+      note:'社区对 google/gemma-4-31b-it 移除安全对齐（abliteration）后的量化转换版本，非独立模型。权重已改动，官方 benchmark 不再适用，故不借用原版分数。'
+    },
+    {
+      key:'gpt-oss-20b',
+      alias:['gpt-oss:20b','gpt-oss-20b','gpt_oss_20b','openai/gpt-oss-20b'],
+      displayName:'gpt-oss-20b', org:'OpenAI', variant:'20B MoE（3.6B 激活）',
+      verified:true, contextLength:131072, license:'apache-2.0', isEmbedding:false,
+      scores:{
+        code:{ HumanEval:null, MBPP:null, LiveCodeBench:null, Aider:34.2 },
+        math:{ MATH:null, GSM8K:null },
+        general:{ MMLU:85.3, 'MMLU-Pro':null, ArcC:null, HellaSwag:null, Winogrande:null, TruthfulQA:null, GPQA:71.5 }
+      },
+      source:'https://deploymentsafety.openai.com/gpt-oss/references',
+      note:'分数取自官方模型卡 high reasoning effort 一档；low / medium 档差异显著（如 MMLU 分别为 80.4 / 84.0 / 85.3）。另公布 SWE-Bench Verified = 60.7（high）。'
+    },
+    {
+      key:'mixtral-8x7b',
+      alias:['mixtral:8x7b','mixtral-8x7b','mixtral-8x7b-instruct','mixtral-8x7b-instruct-v0.1','mixtral'],
+      displayName:'Mixtral 8x7B Instruct v0.1', org:'Mistral AI', variant:'8x7B Instruct',
+      verified:true, contextLength:32768, license:'apache-2.0', isEmbedding:false,
+      scores:{
+        code:{ HumanEval:null, MBPP:null, LiveCodeBench:null, Aider:null },
+        math:{ MATH:null, GSM8K:61.11 },
+        general:{ MMLU:71.40, 'MMLU-Pro':null, ArcC:70.14, HellaSwag:87.55, Winogrande:81.06, TruthfulQA:64.98, GPQA:null }
+      },
+      source:'https://huggingface.co/mistralai/Mixtral-8x7B-Instruct-v0.1',
+      note:'Ollama 的 mixtral:8x7b 对应 Instruct 版。广泛流传的 HumanEval 40.2 / MATH 28.4 / GSM8K 74.4 来自论文中的 Base 版，不能用于指令版，故对应项留空。'
+    },
+    {
+      key:'deepseek-r1-14b',
+      alias:['deepseek-r1:14b','deepseek-r1-14b','deepseek-r1-distill-qwen-14b','deepseek-ai/deepseek-r1-distill-qwen-14b','deepseek-r1'],
+      displayName:'DeepSeek-R1-Distill-Qwen-14B', org:'DeepSeek', variant:'14B 蒸馏（基于 Qwen2.5-14B）',
+      verified:true, contextLength:131072, license:'mit', isEmbedding:false,
+      scores:{
+        code:{ HumanEval:null, MBPP:null, LiveCodeBench:53.1, Aider:null },
+        math:{ MATH:null, GSM8K:null },
+        general:{ MMLU:null, 'MMLU-Pro':null, ArcC:null, HellaSwag:null, Winogrande:null, TruthfulQA:null, GPQA:59.1 }
+      },
+      source:'https://github.com/deepseek-ai/DeepSeek-R1',
+      note:'这是蒸馏版，与 DeepSeek-R1-671B（GPQA 71.5 / LiveCodeBench 65.9）差距很大，切勿混用。官方给的是 MATH-500 口径（93.9），非 MATH 基准。'
+    },
+    {
+      key:'deepseek-coder-v2',
+      alias:['deepseek-coder-v2','deepseek-coder-v2:16b','deepseek-coder-v2-lite','deepseek-coder-v2-instruct'],
+      displayName:'DeepSeek-Coder-V2-Lite-Instruct', org:'DeepSeek', variant:'Lite 16B Instruct（2.4B 激活）',
+      verified:true, contextLength:131072, license:'deepseek-model-license', isEmbedding:false,
+      scores:{
+        code:{ HumanEval:81.1, MBPP:null, LiveCodeBench:24.3, Aider:44.4 },
+        math:{ MATH:61.8, GSM8K:86.4 },
+        general:{ MMLU:60.1, 'MMLU-Pro':null, ArcC:77.4, HellaSwag:null, Winogrande:null, TruthfulQA:null, GPQA:null }
+      },
+      source:'https://github.com/deepseek-ai/DeepSeek-Coder-V2',
+      note:'Ollama 默认下载的是 16B Lite 版（236B 版需数百 GB），故采用 Lite 数据。常被引用的 HumanEval 90.2 / Aider 73.7 属于 236B，本机跑不到。官方仅公布 MBPP+ (EvalPlus) 口径，故 MBPP 留空。'
+    },
+    {
+      key:'nomic-embed-text',
+      alias:['nomic-embed-text','nomic-embed-text:latest','nomic-embed-text:v1.5','nomic-embed-text-v1.5'],
+      displayName:'Nomic Embed Text v1.5', org:'Nomic AI', variant:'v1.5（137M，nomic-bert）',
+      verified:true, contextLength:8192, license:'apache-2.0', isEmbedding:true,
+      embedding:{ dimensions:768, mteb:62.28, matryoshka:[768,512,256,128,64] },
+      scores:{ code:{}, math:{}, general:{} },
+      source:'https://huggingface.co/nomic-ai/nomic-embed-text-v1.5',
+      note:'嵌入模型，不参评生成类 benchmark。MTEB 英文 v1 得分 62.28，支持 Matryoshka 截断至 512/256/128/64。注意 Ollama 模型卡把上下文写作 2048，原生为 8192，需在请求中显式指定。'
+    }
+  ]
+};
+
+/* benchmark 分组定义（渲染顺序即此顺序） */
+const BK_GROUPS=[
+  { key:'code',    label:'代码能力' },
+  { key:'math',    label:'数学推理' },
+  { key:'general', label:'通用能力' }
+];
+/* 每个模型表格里优先展示的代表指标（按此顺序取第一个非空值） */
+const BK_HEADLINE=['LiveCodeBench','HumanEval','MMLU-Pro','MMLU','GSM8K','GPQA','Aider'];
+
+/* 实测提示词与指纹：改提示词则历史实测数据自动失效 */
+const BENCH_PROMPT='用大约 80 个汉字，简要说明二分查找的思路与适用场景。';
+const BENCH_PROMPT_HASH='p1';
+const BENCH_RUNS=3;
+const BENCH_MAX_TOKENS=128;
+
+/* ==========================================================================
+   1. 工具函数
+   ========================================================================== */
+const $=(s,r)=>(r||document).querySelector(s);
+const $$=(s,r)=>Array.from((r||document).querySelectorAll(s));
+const el=(tag,cls,txt)=>{const n=document.createElement(tag);
+  if(cls)n.className=cls; if(txt!=null)n.textContent=txt; return n;};
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+const fmt={
+  bytes(n){
+    if(n==null||isNaN(n))return{ v:'—',u:'' };
+    const u=['B','KiB','MiB','GiB','TiB','PiB']; let i=0,v=n;
+    while(v>=1024&&i<u.length-1){v/=1024;i++;}
+    return{ v:v.toFixed(v>=100||i<2?0:(v>=10?1:2)), u:u[i] };
+  },
+  /* 统一按 1024 进制显示。厂商标称容量用十进制，操作系统与 Ollama 用二进制，
+     这里选后者并在全站保持一致，避免 GB / GiB 混用造成误读。 */
+  bytesFull(n){ return fmt.bytes(n); },
+  params(n){
+    if(n==null||isNaN(n))return'—';
+    if(n>=1e9)return (n/1e9).toFixed(2)+'B';
+    if(n>=1e6)return (n/1e6).toFixed(1)+'M';
+    return String(n);
+  },
+  ns(ns){
+    if(ns==null||isNaN(ns))return'—';
+    if(ns<1e6)return (ns/1e3).toFixed(0)+' µs';
+    if(ns<1e9)return (ns/1e6).toFixed(1)+' ms';
+    return (ns/1e9).toFixed(2)+' s';
+  },
+  ms(x){
+    if(x==null||isNaN(x))return'—';
+    if(x<1000)return x.toFixed(0)+' ms';
+    return (x/1000).toFixed(2)+' s';
+  },
+  tps(x){ return x==null||isNaN(x)?'—':x.toFixed(1); },
+  pct(x,tot){ return !tot?0:(x/tot*100); },
+  pctl(x,tot){ return tot?(x/tot*100).toFixed(1):'0.0'; },
+  int(n){ return n==null?'—':Number(n).toLocaleString('en-US'); },
+  date(iso){
+    if(!iso)return{ s:'—', rel:'' };
+    const d=new Date(iso);
+    if(isNaN(d))return{ s:'—', rel:'' };
+    const p=n=>String(n).padStart(2,'0');
+    const days=Math.floor((Date.now()-d.getTime())/864e5);
+    let rel;
+    if(days<0)rel='未来';
+    else if(days===0)rel='今天';
+    else if(days===1)rel='昨天';
+    else if(days<30)rel=days+' 天前';
+    else if(days<365)rel=Math.floor(days/30)+' 个月前';
+    else rel=Math.floor(days/365)+' 年前';
+    return { s:d.getFullYear()+'/'+p(d.getMonth()+1)+'/'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes()), rel:rel };
+  },
+  short(s,n){
+    s=String(s==null?'':s);
+    return s.length>n? s.slice(0,n-1)+'…' : s;
+  }
+};
+
+/* model_info 字段按后缀提取：架构前缀是动态的（qwen2./gemma3./llama./gptoss. ...） */
+function pick(mi,suffix){
+  if(!mi)return null;
+  const k=Object.keys(mi).find(k=>k===suffix||k.endsWith('.'+suffix));
+  return k?mi[k]:null;
+}
+function extractArch(mi){
+  mi=mi||{};
+  return {
+    arch:            mi['general.architecture']||null,
+    parameterCount:  mi['general.parameter_count']??null,
+    quantizationVer: mi['general.quantization_version']??null,
+    licenseShort:    mi['general.license']??null,
+    fileType:        mi['general.file_type']??null,
+    contextLength:   pick(mi,'context_length'),
+    embeddingLength: pick(mi,'embedding_length'),
+    blockCount:      pick(mi,'block_count'),
+    headCount:       pick(mi,'attention.head_count'),
+    headCountKV:     pick(mi,'attention.head_count_kv'),
+    keyLength:       pick(mi,'attention.key_length'),
+    valueLength:     pick(mi,'attention.value_length'),
+    feedForward:     pick(mi,'feed_forward_length'),
+    ropeFreqBase:    pick(mi,'rope.freq_base'),
+    slidingWindow:   pick(mi,'attention.sliding_window'),
+    expertCount:     pick(mi,'expert_count'),
+    expertUsed:      pick(mi,'expert_used_count'),
+    expertFed:       pick(mi,'expert_feed_forward_length')
+  };
+}
+function quantMix(tensors){
+  if(!Array.isArray(tensors)||!tensors.length)return[];
+  const c=new Map(); let total=0;
+  for(const t of tensors){ c.set(t.type,(c.get(t.type)||0)+1); total++; }
+  return Array.from(c).map(([type,n])=>({type:type,n:n,pct:n/total}))
+                .sort((a,b)=>b.n-a.n);
+}
+function paramToB(label){
+  if(!label)return null;
+  const m=String(label).match(/([\d.]+)\s*([KMB])/i);
+  if(!m)return null;
+  const v=parseFloat(m[1]);
+  const u=m[2].toUpperCase();
+  return u==='M'? v/1000 : u==='K'? v/1e6 : v;
+}
+
+/* ==========================================================================
+   1b. 显存需求估算
+   权重字节数取 /api/tags 的 size（权威值），KV cache 由架构参数理论推算。
+   注意：general.parameter_count 是参数量而非权重字节数，不可用于显存估算
+   （例如 gpt-oss:20b 参数 20.9B 但量化后权重仅 12.8 GiB）。
+   ========================================================================== */
+const KV_BYTES_PER_ELEM = 2;      // Ollama 的 KV cache 使用 F16
+const VRAM_DEFAULT_CTX = 4096;    // 默认按 4096 上下文估算
+const VRAM_OVERHEAD_RATIO = 0.05; // 运行时开销经验值 5%
+
+/* 常见型号速查，降低填写成本。vramGiB 为标称容量。 */
+const GPU_PRESETS=[
+  { name:'RTX 4090',           vramGiB:24 },
+  { name:'RTX 4080 SUPER',     vramGiB:16 },
+  { name:'RTX 4070 Ti SUPER',  vramGiB:16 },
+  { name:'RTX 4070 SUPER',     vramGiB:12 },
+  { name:'RTX 4060 Ti',        vramGiB:8  },
+  { name:'RTX 3090',           vramGiB:24 },
+  { name:'RTX A5000',          vramGiB:24 },
+  { name:'RTX A4000',          vramGiB:16 },
+  { name:'RTX 3060',           vramGiB:12 },
+  { name:'Apple M2 Pro 统一内存', vramGiB:32 },
+  { name:'Apple M3 Max 统一内存',  vramGiB:48 },
+  { name:'自定义',              vramGiB:null }
+];
+
+/* KV cache = 2(K+V) x layers x kv_heads x head_dim x ctx x bytes_per_elem
+   GQA 模型必须用 head_count_kv：qwen2.5-coder:7b 是 28/4，
+   若误用 head_count=28 会高估 7 倍（32K 上下文下 1.75 GiB -> 12.25 GiB）。 */
+function kvCacheBytes(arch,ctx){
+  if(!arch||!ctx)return null;
+  const L=arch.blockCount;
+  const hc=arch.headCount;
+  const kvH=arch.headCountKV!=null?arch.headCountKV:hc;   // 缺 kv_heads 时回退
+  const headDim=arch.keyLength||(hc?Math.floor(arch.embeddingLength/hc):null);
+  if(!L||!kvH||!headDim)return null;
+  return 2*L*kvH*headDim*ctx*KV_BYTES_PER_ELEM;
+}
+
+/* 某模型在某上下文长度下的显存需求（字节） */
+function vramEstimate(row,meta,ctx){
+  const weight=(row&&row.size)||0;
+  const arch=meta&&meta.arch;
+  const isEmb=/nomic-bert/.test(row&&row.family||'');
+  const kvRaw=isEmb?null:kvCacheBytes(arch,ctx);
+  const overhead=weight*VRAM_OVERHEAD_RATIO;
+  const total=weight+(kvRaw||0)+overhead;
+  return {
+    weight:weight, kv:kvRaw||0, overhead:overhead, total:total,
+    ctx:ctx||0, kvAvailable:kvRaw!=null, archKnown:!!arch, isEmbedding:isEmb
+  };
+}
+
+/* 适配判断。阈值取 90% 而非 100%：显存还要分给驱动、桌面合成器、
+   浏览器自身与可能的并发展示。实测 nvidia-smi 显示系统已用 5.4 GiB，
+   叠加其他程序后 10% 余量并不宽裕。 */
+const VRAM_FIT_COMFORT=0.90;
+function fitLevel(est,gpu){
+  if(!gpu||!gpu.vramGiB||!est)return 'unknown';
+  const cap=gpu.vramGiB*1073741824;
+  const ratio=est.total/cap;
+  if(ratio<=VRAM_FIT_COMFORT)return 'comfortable';
+  if(ratio<=1.00)return 'tight';
+  return 'overflow';
+}
+function fitMeta(){
+  return {
+    unknown:     { label:'未配置', cls:'none' },
+    comfortable:{ label:'充裕',   cls:'ok' },
+    tight:       { label:'勉强',   cls:'warn' },
+    overflow:    { label:'溢出',   cls:'dgr' }
+  };
+}
+/* 上下文影响：返回 [ctx, 合计字节] 序列，供抽屉可视化 */
+function vramSeries(row,meta){
+  const out=[];
+  [2048,4096,8192,16384,32768,65536,131072].forEach(c=>{
+    out.push({ ctx:c, total:vramEstimate(row,meta,c).total });
+  });
+  return out;
+}
+
+
+/* ==========================================================================
+   2. API 层
+   ========================================================================== */
+const API={
+  base: (function(){
+    try{ const c=localStorage.getItem('ollama.board.config.v1');
+      if(c){ const o=JSON.parse(c); if(o&&o.base) return String(o.base).replace(/\/+$/,''); } }catch(e){}
+    return 'http://127.0.0.1:11434';
+  })(),
+
+  saveBase(b){
+    this.base=String(b).replace(/\/+$/,'');
+    try{ localStorage.setItem('ollama.board.config.v1',JSON.stringify({base:this.base})); }catch(e){}
+  },
+
+  async _json(path,opt){
+    opt=opt||{};
+    const ac=new AbortController();
+    const to=setTimeout(()=>ac.abort(), opt.timeout||15000);
+    if(opt.signal) opt.signal.addEventListener('abort',()=>ac.abort());
+    try{
+      const init={ method:opt.method||'GET', signal:ac.signal };
+      if(opt.body!=null){ init.headers={'Content-Type':'application/json'};
+        init.body=JSON.stringify(opt.body); }
+      const r=await fetch(this.base+path, init);
+      if(!r.ok){
+        let msg='HTTP '+r.status;
+        try{ const t=await r.text(); if(t) msg+=' · '+fmt.short(t,200); }catch(e){}
+        const e=new Error(msg); e.status=r.status; throw e;
+      }
+      return await r.json();
+    } finally { clearTimeout(to); if(opt.signal) opt.signal.removeEventListener('abort',()=>ac.abort()); }
+  },
+
+  version(){ return this._json('/api/version',{timeout:8000}); },
+  tags(){ return this._json('/api/tags',{timeout:20000}); },
+  ps(){ return this._json('/api/ps',{timeout:8000}); },
+  show(name,signal){
+    return this._json('/api/show',{method:'POST',body:{name:name,verbose:false},
+      timeout:45000, signal:signal});
+  },
+  /* Ollama 要求用 DELETE 方法；POST 会返回 405 */
+  remove(name){
+    return this._json('/api/delete',{method:'DELETE',body:{name:name},timeout:60000});
+  },
+
+  /* 逐行解析 NDJSON 流；Ollama 的错误是流内一行 {"error":...}，HTTP 仍为 200 */
+  async *_stream(path,body,signal){
+    const r=await fetch(this.base+path,{
+      method:'POST', signal:signal,
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body)
+    });
+    if(!r.ok){
+      let msg='HTTP '+r.status;
+      try{ const t=await r.text(); if(t) msg+=' · '+fmt.short(t,200); }catch(e){}
+      throw new Error(msg);
+    }
+    if(!r.body) throw new Error('响应不支持流式读取');
+    const rd=r.body.getReader();
+    const dec=new TextDecoder('utf-8');
+    let rem='';
+    let finished=false;
+    const handle=function(line){
+      const s=line.trim();
+      if(!s) return null;
+      let d; try{ d=JSON.parse(s); }catch(e){ return null; }
+      if(d&&d.error){ const e=new Error(d.error); e.__stream=true; throw e; }
+      return d;
+    };
+    try{
+      while(!finished){
+        const{ done,value }=await rd.read();
+        if(done) break;
+        rem+=dec.decode(value,{stream:true});
+        let nl;
+        while((nl=rem.indexOf('\n'))>=0){
+          const line=rem.slice(0,nl); rem=rem.slice(nl+1);
+          const d=handle(line);
+          if(d) yield d;
+        }
+      }
+      rem+=dec.decode();
+      if(rem.trim()){
+        const d=handle(rem);
+        if(d) yield d;
+      }
+    }finally{
+      finished=true;
+      try{ rd.cancel(); }catch(e){}
+    }
+  },
+
+  pull(name,signal){ return this._stream('/api/pull',{name:name,stream:true},signal); },
+  generate(body,signal){ return this._stream('/api/generate',body,signal); },
+
+  classifyError(err){
+    if(!err)return'offline';
+    if(err.name==='AbortError')return'timeout';
+    if(err instanceof TypeError) return location.protocol==='file:'?'cors':'offline';
+    if(err.status) return 'http';
+    return 'other';
+  }
+};
+
+/* ==========================================================================
+   3. 状态
+   ========================================================================== */
+const LS={ BENCH:'ollama.board.bench.v1', PREFS:'ollama.board.prefs.v1',
+  GPU:'ollama.board.gpu.v1' };
+const store={
+  get(k,d){
+    try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }
+    catch(e){ return d; }
+  },
+  set(k,v){
+    try{ localStorage.setItem(k,JSON.stringify(v)); return true; }
+    catch(e){ return false; }
+  }
+};
+
+const state={
+  status:'idle', statusMsg:'',
+  version:null,
+  models:[], totalSize:0,
+  ps:{models:[]},
+  meta:{},                 // name -> {loading, error, arch, caps, quantMix, license, raw}
+  ui:{ view:'table', q:'', fams:new Set(), band:'', quants:new Set(), caps:new Set(),
+       fits:new Set(), sort:[{k:'size',d:-1}] },
+  gpu:{ name:'', vramGiB:null },
+  bench:{ byDigest:{}, queue:[], running:false, abort:null, cur:null },
+  drawer:{ name:null },
+  modal:null,
+  focusModel:null,
+  newNames:new Set(),
+  benchFailing:false
+};
+
+const isEmbedRow=row=>{
+  const m=state.meta[row.name];
+  if(m&&m.caps) return m.caps.indexOf('embedding')>=0;
+  if(row.family==='nomic-bert') return true;
+  const b=benchmarkFor(row);
+  return !!(b&&b.entry&&b.entry.isEmbedding);
+};
+
+function normalize(tag,psMap){
+  const d=tag.details||{};
+  const tagName=tag.name||tag.model||'';
+  const base=tagName.split(':')[0];
+  const ps=psMap&&psMap[tagName];
+  return {
+    name:tagName, tag:tagName, basename:base,
+    family:d.family||'—', families:d.families||[],
+    paramLabel:d.parameter_size||'—', paramB:paramToB(d.parameter_size),
+    quant:d.quantization_level||'—', format:d.format||'—',
+    parent:d.parent_model||'',
+    size:tag.size||0, digest:tag.digest||'',
+    modifiedAt:tag.modified_at||'',
+    sizeShare:0,
+    vram:ps?ps.size_vram:null, expiresAt:ps?ps.expires_at:null,
+    isResident:!!ps,
+    psSize:ps?ps.size:null
+  };
+}
+
+/* benchmark 三级匹配：L1 精确 → L2 包含 → L3 未收录。命中即停，不确定返回 none。 */
+function benchmarkFor(row){
+  const tag=String(row.tag||'').toLowerCase();
+  const base=String(row.basename||tag.split(':')[0]).toLowerCase();
+  const es=BENCHMARKS.entries;
+  for(const e of es){
+    if(e.alias.some(a=>String(a).toLowerCase()===tag)) return {entry:e,match:'alias'};
+  }
+  for(const e of es){
+    if(e.alias.some(a=>String(a).toLowerCase()===base)) return {entry:e,match:'alias'};
+  }
+  for(const e of es){
+    const k=String(e.key).toLowerCase();
+    if(base&&k&&(base.indexOf(k)>=0||k.indexOf(base)>=0)) return {entry:e,match:'fuzzy'};
+  }
+  return { entry:null, match:'none' };
+}
+function headlineOf(entry){
+  if(!entry)return null;
+  const all={};
+  for(const g of BK_GROUPS) Object.assign(all, entry.scores[g.key]||{});
+  for(const k of BK_HEADLINE){ if(all[k]!=null) return { key:k, val:all[k] }; }
+  for(const g of BK_GROUPS){
+    const o=entry.scores[g.key]||{};
+    for(const k in o){ if(o[k]!=null) return { key:k, val:o[k] }; }
+  }
+  return null;
+}
+function benchFor(row){
+  const b=benchmarkFor(row);
+  if(b.match==='none'||!b.entry) return { match:'none', data:null };
+  const h=headlineOf(b.entry);
+  if(b.entry.verified===false||!h) return { match:b.match, entry:b.entry, data:null, unverified:b.entry.verified===false };
+  return { match:b.match, entry:b.entry, data:h };
+}
+function benchStored(row){
+  const all=store.get(LS.BENCH,{});
+  const e=all[row.digest];
+  if(!e) return null;
+  if(e.promptHash!==BENCH_PROMPT_HASH) return null;
+  return e;
+}
+
+/* family → 稳定色相 */
+function famHue(f){
+  if(f==='—')return 200;
+  let h=0; const s=String(f);
+  for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))%360;
+  return h;
+}
+function famColor(f,l){
+  return 'hsl('+famHue(f)+' '+(l||55)+'% '+(l?42:52)+'%)';
+}
+
+/* 唯一渲染输入：筛选 + 搜索 + 排序。表格与卡片共用。 */
+const sel={
+  rows(){
+    const u=state.ui;
+    const q=u.q.trim().toLowerCase();
+    let r=state.models.filter(m=>{
+      if(u.fams.size&&!u.fams.has(m.family)) return false;
+      if(u.quants.size&&!u.quants.has(m.quant)) return false;
+      if(u.caps.size){
+        const caps=state.meta[m.name]?state.meta[m.name].caps:null;
+        const b=benchmarkFor(m);
+        const set=new Set();
+        if(caps) caps.forEach(c=>set.add(c));
+        if(b.entry&&b.entry.isEmbedding) set.add('embedding');
+        let hit=false; u.caps.forEach(c=>{ if(set.has(c)) hit=true; });
+        if(!hit) return false;
+      }
+      if(u.band){
+        const b=m.paramB;
+        if(b==null) return false;
+        if(u.band==='xs'&&b>=1) return false;
+        if(u.band==='s'&&(b<1||b>=4)) return false;
+        if(u.band==='m'&&(b<4||b>=12)) return false;
+        if(u.band==='l'&&(b<12||b>=25)) return false;
+        if(u.band==='xl'&&b<25) return false;
+      }
+      if(u.fits.size){
+        const lv=fitLevel(vramEstimate(m,state.meta[m.name],VRAM_DEFAULT_CTX),state.gpu);
+        if(!u.fits.has(lv)) return false;
+      }
+      if(q){
+        const hay=(m.name+' '+m.family+' '+m.quant+' '+m.digest+' '+
+          ((state.meta[m.name]&&state.meta[m.name].arch&&state.meta[m.name].arch.arch)||'')).toLowerCase();
+        if(hay.indexOf(q)<0) return false;
+      }
+      return true;
+    });
+    const s=u.sort[0];
+    if(s){
+      const dir=s.d;
+      r.sort((a,b)=>{
+        let x,y;
+        if(s.k==='bench'){
+          const ba=benchFor(a), bbx=benchFor(b);
+          x=ba.data?ba.data.val:-1; y=bbx.data?bbx.data.val:-1;
+        } else if(s.k==='tps'){
+          const ea=benchStored(a), eb=benchStored(b);
+          x=ea?ea.tps:-1; y=eb?eb.tps:-1;
+        } else if(s.k==='ttft'){
+          const ea=benchStored(a), eb=benchStored(b);
+          x=ea?ea.ttftMs:-1; y=eb?eb.ttftMs:-1;
+        } else if(s.k==='ctx'){
+          x=a.contextLength||-1; y=b.contextLength||-1;
+        } else if(s.k==='share'){
+          x=fmt.pct(a.size,state.totalSize); y=fmt.pct(b.size,state.totalSize);
+        } else if(s.k==='vram'){
+          x=vramEstimate(a,state.meta[a.name],VRAM_DEFAULT_CTX).total;
+          y=vramEstimate(b,state.meta[b.name],VRAM_DEFAULT_CTX).total;
+        } else if(s.k==='fit'){
+          const ORDER={overflow:3,tight:2,comfortable:1,unknown:0};
+          x=ORDER[fitLevel(vramEstimate(a,state.meta[a.name],VRAM_DEFAULT_CTX),state.gpu)];
+          y=ORDER[fitLevel(vramEstimate(b,state.meta[b.name],VRAM_DEFAULT_CTX),state.gpu)];
+        } else { x=a[s.k]; y=b[s.k]; }
+        if(typeof x==='string')return dir*x.localeCompare(y);
+        if(x==null)x=-1; if(y==null)y=-1;
+        return dir*(x-y);
+      });
+    }
+    return r;
+  },
+  fams(){ return Array.from(new Set(state.models.map(m=>m.family))).sort(); },
+  quants(){ return Array.from(new Set(state.models.map(m=>m.quant))).sort(); },
+  bands(){
+    return [['xs','< 1B'],['s','1 – 4B'],['m','4 – 12B'],['l','12 – 25B'],['xl','≥ 25B']];
+  },
+  capList(){
+    const s=new Set();
+    state.models.forEach(m=>{
+      const mm=state.meta[m.name];
+      if(mm&&mm.caps) mm.caps.forEach(c=>s.add(c));
+      const b=benchmarkFor(m);
+      if(b.entry&&b.entry.isEmbedding) s.add('embedding');
+    });
+    return Array.from(s).sort();
+  }
+};
+
+/* ==========================================================================
+   4. 图标
+   ========================================================================== */
+const ICO={
+  cube:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 2 7v10l10 5 10-5V7L12 2zm0 2.3 7.5 3.8L12 11.9 4.5 8.1 12 4.3zM4 9.7l7 3.5v6.6l-7-3.5V9.7zm9 10.1v-6.6l7-3.5v6.6l-7 3.5z"/></svg>',
+  server:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><path d="M6 6.5h.01M6 17.5h.01"/></svg>',
+  db:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg>',
+  chip:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg>',
+  gpu:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="9" cy="12" r="2.4"/><path d="M13 10h5M13 14h5"/><path d="M6 3v3M18 3v3"/></svg>',
+  gauge:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 14l4-4"/><path d="M3.5 18a9 9 0 1 1 17 0"/></svg>',
+  search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>',
+  x:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>',
+  table:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10"/></svg>',
+  grid:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg>',
+  bench:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 14l4-4 4 4 5-5 5 5"/><path d="M3 20h18"/></svg>',
+  down:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/></svg>',
+  cog:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>',
+  refresh:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>',
+  trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>',
+  info:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5M12 8h.01"/></svg>',
+  warn:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>',
+  ok:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg>',
+  copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+  play:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 4l14 8-14 8V4z"/></svg>',
+  stop:'<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
+  broom:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3l-8 8"/><path d="M11 11l-6 6v4h4l6-6"/><path d="M14 8l2 2 3-3-2-2-3 3z"/></svg>',
+  eye:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1.5 12S5 5 12 5s10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+  bulb:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg>',
+  wand:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4V2M15 10V8M12.5 6h-2M19.5 6h-2"/><path d="M4 20l10-10 2 2L6 22l-3 1 1-3z"/></svg>',
+  block:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>',
+  file:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>',
+  book:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v18H6.5A2.5 2.5 0 0 0 4 22z"/><path d="M4 17.5A2.5 2.5 0 0 1 6.5 15H20"/></svg>'
+};
+const CAP_META={
+  completion:{ label:'文本生成', ic:'file' },
+  tools:     { label:'工具调用', ic:'wand' },
+  insert:    { label:'FIM 补全', ic:'bulb' },
+  vision:    { label:'视觉理解', ic:'eye' },
+  embedding: { label:'向量化',   ic:'block' },
+  thinking:  { label:'深度思考', ic:'chip' }
+};
+
+/* ==========================================================================
+   5. Toast
+   ========================================================================== */
+function toast(kind,title,desc,ms){
+  const t=el('div','toast '+(kind||'info'));
+  const ic={ok:ICO.ok,err:ICO.warn,warn:ICO.warn,info:ICO.info}[kind]||ICO.info;
+  t.innerHTML=ic+'<div class="tx"><b>'+esc(title)+'</b>'+(desc?'<span>'+esc(desc)+'</span>':'')+'</div>';
+  $('#troot').appendChild(t);
+  const tm=setTimeout(()=>{
+    t.classList.add('out');
+    setTimeout(()=>t.remove(),260);
+  }, ms||3800);
+  t.addEventListener('click',()=>{ clearTimeout(tm); t.classList.add('out'); setTimeout(()=>t.remove(),260); });
+  return t;
+}
+
+/* ==========================================================================
+   6. 复制到剪贴板（file:// 下 Clipboard API 不可用，退回 execCommand）
+   ========================================================================== */
+async function copyText(text){
+  try{
+    if(navigator.clipboard&&window.isSecureContext){ await navigator.clipboard.writeText(text); return true; }
+  }catch(e){}
+  try{
+    const ta=el('textarea'); ta.value=text;
+    ta.style.cssText='position:fixed;left:-9999px;top:0;opacity:0';
+    document.body.appendChild(ta); ta.select();
+    const ok=document.execCommand('copy'); ta.remove(); return ok;
+  }catch(e){ return false; }
+}
+
+/* ==========================================================================
+   7. 渲染：统计条
+   ========================================================================== */
+function renderHeader(){
+  $('#brandMk').innerHTML=ICO.cube;
+  $$('#hdSub')[0].textContent='本地已安装模型 · 体积 · 能力 · 实测速度';
+  const pill=$('#connPill'), tx=$('#connTx');
+  pill.className='pill act '+(state.status==='ready'?'ok':state.status==='cors'?'warn':'err');
+  tx.textContent = state.status==='ready' ? ('已连接'+(state.version?' '+state.version:''))
+    : state.status==='cors' ? '跨域受限'
+    : state.status==='loading' ? '连接中…'
+    : state.status==='error' ? '未连接' : '—';
+  const bv=$('#btnBench');
+  if(state.bench.running){ bv.classList.add('dgr'); bv.innerHTML=ICO.stop; bv.title='中止批量实测'; }
+  else{ bv.classList.remove('dgr'); bv.innerHTML=ICO.bench; bv.title='批量实测所有可测模型'; }
+}
+
+function renderStats(){
+  const box=$('#stats'); box.innerHTML='';
+  const n=state.models.length;
+  const vram=state.ps.models.reduce((a,m)=>a+(m.size_vram||m.size||0),0);
+  const bkCount=state.models.filter(m=>{ const b=benchFor(m); return b.data||b.entry; }).length;
+  const bmCount=state.models.filter(m=>benchStored(m)).length;
+  const bs=state.totalSize?fmt.bytesFull(state.totalSize):{v:'—',u:''};
+
+  const cards=[
+    { lb:'磁盘占用', ic:ICO.db, vl:bs.v+' <span class="stat-sb" style="display:inline">'+bs.u+'</span>',
+      sb:n+' 个模型 · 1024 进制', lead:true },
+    { lb:'模型总数', ic:ICO.cube, vl:String(n), sb:sel.fams().length+' 个架构家族', cls:'acc' },
+    { lb:'驻留显存', ic:ICO.chip,
+      vl:state.ps.models.length?fmt.bytes(vram).v+'<span class="stat-sb" style="display:inline">'+fmt.bytes(vram).u+'</span>':'无',
+      sb:state.ps.models.length?state.ps.models.length+' 个模型驻留中':'当前无驻留模型',
+      dim:!state.ps.models.length },
+    { lb:'能力数据', ic:ICO.book, vl:bkCount+'<span class="stat-sb" style="display:inline">/'+n+'</span>',
+      sb:'已收录官方 benchmark', cls:'bench' },
+    { lb:'实测完成', ic:ICO.gauge, vl:bmCount+'<span class="stat-sb" style="display:inline">/'+n+'</span>',
+      sb:'本机跑分已记录', cls:'bench' }
+  ];
+
+  // 显卡卡：未配置时作为引导入口
+  const gc=el('div','card'+(state.gpu&&state.gpu.vramGiB?' vram':''));
+  if(state.gpu&&state.gpu.vramGiB){
+    const cap=state.gpu.vramGiB;
+    const fits={overflow:0,tight:0,comfortable:0};
+    state.models.forEach(m=>{
+      fits[fitLevel(vramEstimate(m,state.meta[m.name],VRAM_DEFAULT_CTX),state.gpu)]++;
+    });
+    gc.innerHTML='<div class="stat-lb">'+ICO.gpu+' 本机显卡</div>'+
+      '<div class="stat-vl vram-c">'+cap.toFixed(cap>=100?0:1)+
+      ' <span class="stat-sb" style="display:inline">GiB</span></div>'+
+      '<div class="stat-sb" title="'+esc(state.gpu.name)+'">'+
+        esc(fmt.short(state.gpu.name,22))+' · 可容纳 '+
+        (fits.comfortable+fits.tight)+' / '+n+' 个模型</div>';
+    gc.style.cursor='pointer';
+    gc.title='点击修改显卡配置';
+    gc.addEventListener('click',confirmCfg);
+  } else {
+    gc.innerHTML='<div class="stat-lb">'+ICO.gpu+' 本机显卡</div>'+
+      '<div class="stat-vl" style="color:var(--idle);font-size:var(--fs-xl)">未配置</div>'+
+      '<div class="stat-sb" style="color:var(--vram);font-weight:600">点击填写以判断模型能否装入</div>';
+    gc.style.cursor='pointer';
+    gc.style.borderColor='#ddd6fe';
+    gc.style.background='linear-gradient(150deg,#fff,#faf7ff)';
+    gc.addEventListener('click',confirmCfg);
+  }
+  box.appendChild(gc);
+  for(const c of cards){
+    const d=el('div','card'+(c.lead?' lead':''));
+    d.innerHTML='<div class="stat-lb">'+c.ic+c.lb+'</div>'+
+      '<div class="stat-vl '+(c.cls||'')+'"'+(c.dim?' style="color:var(--text-3)"':'')+'>'+c.vl+'</div>'+
+      '<div class="stat-sb">'+esc(c.sb)+'</div>';
+    box.appendChild(d);
+  }
+}
+
+function renderShare(){
+  const tr=$('#sbTrack'), lg=$('#sbLegend');
+  tr.innerHTML=''; lg.innerHTML='';
+  const ms=state.models;
+  if(!ms.length){ tr.innerHTML='<div style="flex:1;display:grid;place-items:center;font-size:var(--fs-xs);color:var(--text-3)">无数据</div>'; return; }
+  const total=state.totalSize||1;
+  const sorted=ms.slice().sort((a,b)=>b.size-a.size);
+  for(const m of sorted){
+    const seg=el('div','sb-seg'+(state.focusModel===m.name?' sel':''));
+    seg.style.flex=Math.max(m.size/total,0.004);
+    seg.style.background='linear-gradient(180deg,'+famColor(m.family,58)+','+famColor(m.family,44)+')';
+    seg.title=m.name+'\n'+fmt.bytes(m.size).v+' '+fmt.bytes(m.size).u+
+      '  ·  '+fmt.pctl(m.size,total)+'%';
+    seg.addEventListener('click',()=>{
+      state.focusModel = state.focusModel===m.name?null:m.name;
+      renderShare();
+    });
+    tr.appendChild(seg);
+  }
+  const fams=sel.fams();
+  for(const f of fams){
+    const sub=ms.filter(m=>m.family===f);
+    const sz=sub.reduce((a,m)=>a+m.size,0);
+    const it=el('div','sb-item');
+    it.innerHTML='<i class="sb-sw" style="background:'+famColor(f,50)+'"></i>'+
+      esc(f)+' <span style="color:var(--text-3)">'+sub.length+' 个 · '+
+      fmt.bytes(sz).v+fmt.bytes(sz).u+' · '+fmt.pctl(sz,total)+'%</span>';
+    lg.appendChild(it);
+  }
+  if(state.focusModel){
+    const it=el('div','sb-item');
+    it.style.cssText='cursor:pointer;color:var(--accent-ink);font-weight:600';
+    it.innerHTML=ICO.x.replace('<svg','<svg style="width:11px;height:11px"')+' 已定位 '+
+      esc(fmt.short(state.focusModel,28))+' · 点击取消';
+    it.addEventListener('click',()=>{ state.focusModel=null; renderShare(); });
+    lg.appendChild(it);
+  }
+}
+
+/* ==========================================================================
+   8. 渲染：筛选栏
+   ========================================================================== */
+const BANDS=[['xs','< 1B'],['s','1–4B'],['m','4–12B'],['l','12–25B'],['xl','≥ 25B']];
+function renderChips(){
+  const box=$('#chips'); box.innerHTML='';
+  const u=state.ui;
+  const mk=(label,on,cb,title)=>{
+    const b=el('button','chip'); b.setAttribute('aria-pressed',on?'true':'false');
+    b.textContent=label; if(title)b.title=title;
+    b.addEventListener('click',cb); box.appendChild(b); return b;
+  };
+  const fams=sel.fams();
+  if(fams.length>1){
+    box.appendChild(el('span','',' '));
+    fams.forEach(f=>mk(f,u.fams.has(f),()=>{ u.fams.has(f)?u.fams.delete(f):u.fams.add(f); renderAll(); },
+      state.models.filter(m=>m.family===f).length+' 个模型'));
+  }
+  const qs=sel.quants();
+  if(qs.length>1){ qs.forEach(q=>mk(q,u.quants.has(q),()=>{ u.quants.has(q)?u.quants.delete(q):u.quants.add(q); renderAll(); })); }
+  const caps=sel.capList();
+  if(caps.length){
+    caps.forEach(c=>{
+      const meta=CAP_META[c];
+      mk((meta?meta.label:c),u.caps.has(c),()=>{ u.caps.has(c)?u.caps.delete(c):u.caps.add(c); renderAll(); });
+    });
+  }
+  // 显存适配筛选：仅在已配置显卡时有意义
+  if(state.gpu&&state.gpu.vramGiB){
+    const fm=fitMeta();
+    box.appendChild(el('span','',' '));
+    ['overflow','tight','comfortable'].forEach(k=>{
+      mk(fm[k].label,u.fits.has(k),()=>{ u.fits.has(k)?u.fits.delete(k):u.fits.add(k); renderAll(); },
+        '按 '+state.gpu.name+' 的 '+state.gpu.vramGiB+' GiB 显存判断');
+    });
+  }
+  const bandBox=el('div','chips'); bandBox.style.marginLeft='4px';
+  BANDS.forEach(([k,lb])=>{
+    const b=el('button','chip'); b.setAttribute('aria-pressed',u.band===k?'true':'false');
+    b.textContent=lb;
+    b.addEventListener('click',()=>{ u.band = u.band===k?'':k; renderAll(); });
+    bandBox.appendChild(b);
+  });
+  box.appendChild(bandBox);
+  const act=[u.fams.size,u.quants.size,u.caps.size,u.fits.size,u.band?1:0,u.q?1:0].reduce((a,b)=>a+b,0);
+  const rs=$('#btnReset');
+  rs.innerHTML=act?('重置 '+act+' 项筛选'):'重置筛选';
+  rs.style.opacity=act?1:.4;
+  rs.disabled=!act;
+}
+
+/* ==========================================================================
+   9. 渲染：表格
+   ========================================================================== */
+const COLS=[
+  { k:'name',   lb:'模型',        grp:null },
+  { k:'fam',    lb:'架构家族',     grp:null, nw:true },
+  { k:'paramB', lb:'参数量',      grp:null, nw:true },
+  { k:'quant',  lb:'量化',        grp:null, nw:true },
+  { k:'size',   lb:'磁盘大小',     grp:null, nw:true },
+  { k:'share',  lb:'精确字节数',   grp:null, nw:true },
+  { k:'ctx',    lb:'上下文',      grp:null, nw:true },
+  { k:'vram',   lb:'显存需求',     grp:'vram', nw:true },
+  { k:'fit',    lb:'适配',        grp:'vram', nw:true },
+  { k:'bench',  lb:'能力分',      grp:'bmk' },
+  { k:'tps',    lb:'生成速度',     grp:'real' },
+  { k:'ttft',   lb:'首字延迟',     grp:'real' },
+  { k:'_act',   lb:'',           grp:null, nw:true }
+];
+function renderTable(rows){
+  const th=$('#tbl thead'), tb=$('#tbl tbody');
+  th.innerHTML=''; tb.innerHTML='';
+  const u=state.ui;
+  const cur=u.sort[0];
+
+  /* 分组表头：按 COLS 的 grp 自动合并，列数变化时不会错位。
+     三个数据分组用不同底色物理分区，彼此不可混淆：
+       基本信息 / 显存（紫）/ 官方 benchmark（青绿）/ 本机实测（靛蓝） */
+  const GRP_META={
+    vram:{ cls:'grp vram', lb:'显存需求' },
+    bmk: { cls:'grp bmk',  lb:'官方 benchmark' },
+    real:{ cls:'grp bench',lb:'本机实测' }
+  };
+  const r1=el('tr','g-rw');
+  let i=0;
+  while(i<COLS.length){
+    const g=COLS[i].grp;
+    if(!g){ r1.appendChild(el('th','grp','')); i++; continue; }
+    let n=0;
+    while(i+n<COLS.length&&COLS[i+n].grp===g) n++;
+    const meta=GRP_META[g]||{cls:'grp',lb:g};
+    const cell=el('th',meta.cls,meta.lb);
+    if(n>1) cell.colSpan=n;
+    r1.appendChild(cell);
+    i+=n;
+  }
+  th.appendChild(r1);
+
+  const r2=el('tr','rw');
+  for(const c of COLS){
+    const th2=el('th', c.nw?'nw':'');
+    if(c.lb){
+      th2.className+=' srt';
+      th2.innerHTML=esc(c.lb)+'<span class="ar">'+(cur.k===c.k?(cur.d>0?'▲':'▼'):'◆')+'</span>';
+      if(cur.k===c.k) th2.classList.add('act');
+      th2.addEventListener('click',ev=>onSort(c.k,ev.shiftKey));
+    }
+    r2.appendChild(th2);
+  }
+  th.appendChild(r2);
+
+  for(const m of rows) tb.appendChild(rowTr(m));
+}
+function onSort(k,multi){
+  const u=state.ui;
+  if(!multi||k==='name'){ u.sort=[{k:k,d:(u.sort[0]&&u.sort[0].k===k)?-u.sort[0].d:(k==='name'?1:-1)}]; }
+  else{
+    const f=u.sort.find(s=>s.k===k);
+    if(f) f.d=-f.d; else u.sort.push({k:k,d:-1});
+  }
+  renderAll();
+}
+function rowTr(m){
+  const tr=el('tr');
+  if(state.newNames.has(m.name)) tr.classList.add('new');
+  const mm=state.meta[m.name];
+  if(mm&&mm.error) tr.classList.add('meta-warn');
+  if(state.focusModel===m.name) tr.style.background='var(--accent-soft)';
+
+  // 模型名
+  const td0=el('td');
+  const b=benchFor(m);
+  const bn=b.entry?b.entry.displayName:'';
+  td0.innerHTML='<div class="nm"><a data-open="'+esc(m.name)+'">'+
+    (m.isResident?'<i class="resid" title="驻留显存中"></i>':'')+
+    esc(m.name)+'</a>'+
+    (bn?'<span class="b" title="'+esc(bn)+'">'+esc(bn)+'</span>'
+       :'<span class="b">'+esc(m.family)+' · '+esc(m.quant)+'</span>')+'</div>';
+  tr.appendChild(td0);
+
+  // 架构家族
+  const td1=el('td','nw');
+  td1.innerHTML='<span class="bg">'+esc(m.family)+'</span>';
+  tr.appendChild(td1);
+
+  // 参数量
+  const td2=el('td','nw');
+  const isMoE=mm&&mm.arch&&mm.arch.expertCount;
+  td2.innerHTML='<span class="num">'+esc(m.paramLabel)+'</span>'+
+    (isMoE?'<br><span class="bg moe sm" title="混合专家：'+mm.arch.expertCount+' 个专家，每次激活 '+mm.arch.expertUsed+' 个">MoE '+mm.arch.expertCount+'/'+mm.arch.expertUsed+'</span>':'');
+  tr.appendChild(td2);
+
+  // 量化
+  const td3=el('td','nw');
+  td3.innerHTML='<span class="bg">'+esc(m.quant)+'</span>';
+  tr.appendChild(td3);
+
+  // 大小
+  const td4=el('td','nw');
+  const sz=fmt.bytes(m.size);
+  td4.innerHTML='<div class="sz"><span class="sz-v">'+sz.v+' '+sz.u+'</span>'+
+    '<span class="sz-b"><i style="width:'+Math.max(fmt.pct(m.size,state.totalSize)*2.2,2)+'%"></i></span>'+
+    '<span class="sz-s">'+fmt.pctl(m.size,state.totalSize)+'% 占用</span></div>';
+  tr.appendChild(td4);
+
+  // 占比
+  const td5=el('td','nw');
+  td5.innerHTML='<span class="num" style="font-weight:600;color:var(--accent-ink)">'+
+    fmt.int(m.size)+'</span><span class="bm-u"> B</span>';
+  tr.appendChild(td5);
+
+  // 上下文（优先用 show 拿到的真实值，未加载时用 benchmark 声明值并标注来源）
+  const td6=el('td','nw');
+  const mmCtx=mm&&mm.arch&&mm.arch.contextLength;
+  const bkCtx=b.entry&&b.entry.contextLength;
+  if(mmCtx){
+    td6.innerHTML='<span class="num">'+fmt.int(mmCtx)+'</span>';
+    td6.title='来自本机模型元数据';
+  } else if(bkCtx){
+    td6.innerHTML='<span class="num" style="color:var(--text-2)">'+fmt.int(bkCtx)+'</span>';
+    td6.title='来自官方模型卡声明值，本机元数据尚未载入';
+  } else {
+    td6.innerHTML='<span style="color:var(--idle)">—</span>';
+    td6.title='未找到上下文长度信息';
+  }
+  tr.appendChild(td6);
+
+  // 显存需求 + 适配
+  tr.appendChild(vramTd(m));
+  tr.appendChild(fitTd(m));
+
+  // 官方 benchmark
+  tr.appendChild(benchTd(m,b));
+  // 实测
+  tr.appendChild(realTd(m,'tps'));
+  tr.appendChild(realTd(m,'ttft'));
+
+  // 操作
+  const tdA=el('td','nw');
+  tdA.innerHTML='<div class="acts">'+
+    '<button class="btn icon sm gho" data-bench="'+esc(m.name)+'" title="实测速度">'+ICO.gauge+'</button>'+
+    '<button class="btn icon sm gho" data-copy="'+esc(m.name)+'" title="复制 ollama run 命令">'+ICO.copy+'</button>'+
+    '<button class="btn icon sm gho" data-del="'+esc(m.name)+'" title="删除模型">'+ICO.trash+'</button>'+
+    '</div>';
+  tr.appendChild(tdA);
+  return tr;
+}
+/* 显存需求单元：主值合计 + 权重/KV 构成 + 占显卡比例条 */
+function vramTd(m){
+  const td=el('td');
+  const mm=state.meta[m.name];
+  const est=vramEstimate(m,mm,VRAM_DEFAULT_CTX);
+  const lv=fitLevel(est,state.gpu);
+  const tv=fmt.bytes(est.total);
+  const wv=fmt.bytes(est.weight);
+  const wrap=el('div','vr');
+
+  // 占比条：以显卡容量为 100%；未配置显卡时退化为相对最大模型
+  let ratio=0, ref=state.gpu&&state.gpu.vramGiB?state.gpu.vramGiB*1073741824:0;
+  if(ref) ratio=est.total/ref;
+  else{
+    const max=state.models.reduce((a,x)=>Math.max(a,x.size*1.1),1);
+    ratio=est.total/max;
+  }
+  const cls=lv==='comfortable'?'ok':lv==='tight'?'warn':lv==='overflow'?'dgr':'none';
+
+  wrap.innerHTML=
+    '<span class="vr-n">'+tv.v+' '+tv.u+'</span>'+
+    '<span class="vr-bar"><i class="'+cls+'" style="width:'+Math.min(ratio*100,100).toFixed(1)+'%"></i></span>'+
+    '<span class="vr-u">权重 '+wv.v+wv.u+
+      (est.kvAvailable?' + KV '+fmt.bytes(est.kv).v+fmt.bytes(est.kv).u:'')+
+    '</span>';
+  td.appendChild(wrap);
+
+  if(!mm||!mm.arch){
+    td.title='模型元数据尚未载入，当前仅显示权重占用估算。展开详情可加载完整数据。';
+  }else if(est.isEmbedding){
+    td.title='嵌入模型仅含编码器，无 KV cache 需求。此处为权重 + 5% 运行时开销。';
+  }else if(est.kvAvailable){
+    td.title='显存需求（理论估算）\n'+
+      '权重　　'+wv.v+' '+wv.u+'（取自 /api/tags 的 size，权威值）\n'+
+      'KV cache '+fmt.bytes(est.kv).v+' '+fmt.bytes(est.kv).u+
+        '（'+VRAM_DEFAULT_CTX+' 上下文，'+((est.kv/est.total)*100).toFixed(1)+'% 占比）\n'+
+      '开销　　'+fmt.bytes(est.overhead).v+' '+fmt.bytes(est.overhead).u+'（按权重 5% 估算）\n'+
+      '合计　　'+tv.v+' '+tv.u+'\n\n'+
+      'KV cache 随上下文长度线性增长，此为理论值。实际占用受驱动版本、量化 kernel 影响，以实测为准。';
+  }else{
+    td.title='该模型架构缺少计算 KV cache 所需的字段，仅显示权重 + 开销估算。';
+  }
+  return td;
+}
+/* 适配徽章：充裕 / 勉强 / 溢出 / 未配置 */
+function fitTd(m){
+  const td=el('td');
+  const mm=state.meta[m.name];
+  const est=vramEstimate(m,mm,VRAM_DEFAULT_CTX);
+  const lv=fitLevel(est,state.gpu);
+  const fm=fitMeta()[lv];
+  const b=el('span','fit '+fm.cls,'<i></i>'+fm.label);
+  td.appendChild(b);
+  if(state.gpu&&state.gpu.vramGiB){
+    const cap=state.gpu.vramGiB*1073741824;
+    const pctv=est.total/cap*100;
+    td.title=state.gpu.name+'（'+state.gpu.vramGiB+' GiB）\n'+
+      '需求 '+fmt.bytes(est.total).v+fmt.bytes(est.total).u+' · 占用 '+pctv.toFixed(0)+'%\n'+
+      (lv==='overflow'
+        ? '超出 '+fmt.bytes(est.total-cap).v+fmt.bytes(est.total-cap).u+
+          '，超出部分将回落至系统内存运行，推理速度显著下降。'
+        : lv==='tight'
+          ? '余量不足 10%，叠加驱动与其他程序的占用可能触发部分回落。'
+          : '可完整载入显存，留有约 '+((1-pctv/100)*100).toFixed(0)+'% 余量。');
+  } else {
+    td.title='尚未配置显卡信息，无法判断能否装入。可在右上角设置中填写。';
+    b.style.cursor='pointer';
+    b.addEventListener('click',()=>confirmCfg());
+  }
+  return td;
+}
+function benchTd(m,b){
+  const td=el('td');
+  const wrap=el('div','bk');
+  if(b.match==='none'||!b.entry){
+    wrap.innerHTML='<span class="bk-none">未收录</span>';
+    td.appendChild(wrap); td.title='未找到该模型官方公开发布的 benchmark 数据';
+    return td;
+  }
+  if(!b.data){
+    wrap.innerHTML='<span class="bk-none">数据待核</span>';
+    td.appendChild(wrap);
+    td.title=b.entry.note||'未找到可引用的官方数值';
+    return td;
+  }
+  const d=b.data;
+  const all={}; BK_GROUPS.forEach(g=>Object.assign(all,b.entry.scores[g.key]||{}));
+  const others=Object.keys(all).filter(k=>k!==d.key&&all[k]!=null).slice(0,2)
+    .map(k=>k+' '+all[k]);
+  wrap.innerHTML='<span class="bk-t">'+esc(d.key)+'</span>'+
+    '<div class="bk-r"><span class="bk-n">'+d.val+'</span><span class="bk-u">%</span>'+
+    (b.match==='fuzzy'?'<span class="bk-fz" title="本地 tag 与该条目为近似匹配，映射依据：'+esc(m.tag)+' → '+esc(b.entry.key)+'">近似</span>':'')+
+    '</div>'+
+    (others.length?'<span class="bk-2nd">'+esc(others.join(' · '))+'</span>':'');
+  td.appendChild(wrap);
+  td.title=b.entry.displayName+'（'+b.entry.variant+'）\n来源：'+b.entry.source+
+    (b.entry.note?'\n\n口径说明：'+b.entry.note:'');
+  return td;
+}
+function realTd(m,kind){
+  const td=el('td');
+  const e=benchStored(m);
+  const wrap=el('div','bm');
+  const running=state.bench.cur===m.name;
+  if(running){
+    wrap.innerHTML='<span class="bm-run"><span class="spin"></span> 测速中…</span>';
+  } else if(!e){
+    wrap.innerHTML='<span class="bm-none">未测</span>';
+  } else {
+    const think=(state.meta[m.name]&&state.meta[m.name].caps||[]).indexOf('thinking')>=0;
+    if(kind==='tps'){
+      wrap.innerHTML='<div class="bm-r"><span class="bm-n">'+fmt.tps(e.tps)+'</span>'+
+        '<span class="bm-u">tok/s</span>'+(think?'<span class="bm-think" title="该模型启用了深度思考，eval_count 包含思考 token">思考</span>':'')+'</div>'+
+        '<span class="bm-u">预热后 '+e.runs+' 次中位</span>';
+    } else {
+      wrap.innerHTML='<div class="bm-r"><span class="bm-n">'+fmt.ms(e.ttftMs)+'</span></div>'+
+        '<span class="bm-u">加载 '+fmt.ms(e.loadMs)+'</span>';
+    }
+  }
+  td.appendChild(wrap);
+  if(e) td.title='记录于 '+fmt.date(new Date(e.ts).toISOString()).s+
+    '\n生成 '+e.evalCount+' tokens · 提示词处理 '+fmt.tps(e.promptTps)+' tok/s';
+  return td;
+}
+
+/* ==========================================================================
+   10. 渲染：卡片
+   ========================================================================== */
+function renderCards(rows){
+  const box=$('#viewCard'); box.innerHTML='';
+  for(const m of rows){
+    const c=el('div','mc');
+    if(state.newNames.has(m.name)) c.classList.add('new');
+    c.style.setProperty('--fam-hue',famHue(m.family));
+    const b=benchFor(m), e=benchStored(m), sz=fmt.bytes(m.size), mm=state.meta[m.name];
+    const isMoE=mm&&mm.arch&&mm.arch.expertCount;
+    const ctx=(mm&&mm.arch&&mm.arch.contextLength)||(b.entry&&b.entry.contextLength);
+
+    const caps=[];
+    if(mm&&mm.caps) mm.caps.forEach(c2=>{ if(CAP_META[c2]) caps.push(CAP_META[c2].label); });
+    else if(b.entry&&b.entry.isEmbedding) caps.push('向量化');
+
+    c.innerHTML=
+      '<div class="mc-t"><div class="nm">'+
+        '<a data-open="'+esc(m.name)+'">'+(m.isResident?'<i class="resid" title="驻留显存中"></i>':'')+esc(m.name)+'</a>'+
+        '<span class="b">'+esc(b.entry?b.entry.displayName:m.family+' · '+m.quant)+'</span>'+
+      '</div><div class="acts">'+
+        '<button class="btn icon sm gho" data-bench="'+esc(m.name)+'" title="实测">'+ICO.gauge+'</button>'+
+        '<button class="btn icon sm gho" data-del="'+esc(m.name)+'" title="删除">'+ICO.trash+'</button>'+
+      '</div></div>'+
+      '<div class="mc-sz"><span class="big">'+sz.v+'</span><span style="color:var(--text-3);font-size:var(--fs-sm)">'+sz.u+'</span>'+
+        '<span class="pc">'+fmt.pctl(m.size,state.totalSize)+'%</span>'+
+        '<span class="tag">'+esc(m.quant)+(isMoE?' · MoE':'')+'</span></div>'+
+      '<div class="mc-bar"><i style="width:'+Math.max(fmt.pct(m.size,state.totalSize),0.6)+'%"></i></div>'+
+      '<div class="mc-tags">'+caps.slice(0,4).map(t=>'<span class="bg sm">'+esc(t)+'</span>').join('')+
+        (ctx?'<span class="bg sm">'+fmt.int(ctx)+' ctx</span>':'')+'</div>'+
+      '<div class="mc-g">'+
+        '<div class="mc-col g"><span class="bd-l">官方 benchmark</span>'+
+          (b.data?'<div class="mc-r"><b>'+b.data.val+'</b><span>% '+esc(b.data.key)+'</span></div>'+
+                  (b.match==='fuzzy'?'<span class="bk-fz">近似匹配</span>':'')
+           :'<div class="mc-r"><b style="color:var(--idle);font-size:var(--fs-sm)">未收录</b></div>')+
+        '</div>'+
+        '<div class="mc-col b"><span class="bd-l">本机实测</span>'+
+          (state.bench.cur===m.name?'<div class="mc-r"><b style="font-size:var(--fs-sm)"><span class="spin"></span> 测速中</b></div>'
+           :e?'<div class="mc-r"><b>'+fmt.tps(e.tps)+'</b><span>tok/s</span></div>'+
+              '<div class="mc-r"><b style="font-size:var(--fs-sm)">'+fmt.ms(e.ttftMs)+'</b><span>首字</span></div>'
+           :'<div class="mc-r"><b style="color:var(--idle);font-size:var(--fs-sm)">未测</b></div>')+
+        '</div>'+
+      '</div>';
+    box.appendChild(c);
+  }
+}
+
+/* ==========================================================================
+   11. 主渲染
+   ========================================================================== */
+function renderAll(){
+  renderHeader(); renderStats(); renderShare(); renderChips();
+  const rows=sel.rows();
+  const none=!state.models.length;
+  const filtered=!none&&!rows.length;
+  $('#viewTable').hidden = state.ui.view!=='table'||none||filtered;
+  $('#viewCard').hidden  = state.ui.view!=='card'||none||filtered;
+  const eb=$('#emptyBox');
+  if(none||filtered){
+    eb.hidden=false;
+    eb.innerHTML=ICO.search+'<h3>'+(none?'尚未读取到模型':'没有符合条件的模型')+'</h3>'+
+      '<p>'+(none?'点击右上角刷新重试':'试试调整搜索词或清除筛选条件')+'</p>'+
+      (none?'':'<button class="btn" id="ebReset">重置筛选</button>');
+    const rb=$('#ebReset');
+    if(rb) rb.addEventListener('click',resetFilters);
+  } else eb.hidden=true;
+
+  if(state.ui.view==='table'&&!none&&!filtered) renderTable(rows);
+  if(state.ui.view==='card'&&!none&&!filtered) renderCards(rows);
+
+  const tot=state.models.length;
+  const all=benchFor({tag:''})&&null;
+  const fc=$('#fcount');
+  fc.innerHTML = rows.length===tot ? (tot+' 个模型')
+    : ('<b>'+rows.length+'</b> / '+tot+' 个模型');
+  $$('#fbarInSeg, .seg button').forEach(b=>{
+    if(b.dataset.view) b.setAttribute('aria-pressed', b.dataset.view===state.ui.view?'true':'false');
+  });
+  $('#searchWrap').classList.toggle('has', !!state.ui.q);
+}
+function resetFilters(){
+  const u=state.ui;
+  u.q=''; u.fams.clear(); u.quants.clear(); u.caps.clear(); u.fits.clear();
+  u.band=''; state.focusModel=null;
+  $('#q').value='';
+  renderAll();
+}
+
+/* ==========================================================================
+   12. 详情抽屉
+   ========================================================================== */
+async function openDrawer(name){
+  state.drawer.name=name;
+  const d=$('#drawer');
+  d.classList.add('on'); d.setAttribute('aria-hidden','false');
+  $('#scrim').classList.add('on');
+  const m=state.models.find(x=>x.name===name);
+  d.innerHTML= m? drawerShell(m) : '<div class="mo-hd"><h2>未找到模型</h2></div>';
+  d.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click',closeDrawer));
+  const cp=d.querySelector('[data-copy]');
+  if(cp) cp.addEventListener('click',()=>doCopy(name));
+  const dl=d.querySelector('[data-del]');
+  if(dl) dl.addEventListener('click',()=>confirmDelete(name));
+  const bt=d.querySelector('[data-bench]');
+  if(bt) bt.addEventListener('click',()=>runBenchOne(name));
+  const lic=d.querySelector('[data-lic]');
+  if(lic) lic.addEventListener('click',()=>{
+    const box=d.querySelector('.lic'); const open=box.classList.toggle('open');
+    lic.textContent=open?'收起':'展开全文';
+  });
+  loadMeta(name);
+}
+function closeDrawer(){
+  state.drawer.name=null;
+  $('#drawer').classList.remove('on');
+  $('#drawer').setAttribute('aria-hidden','true');
+  if(!$('#mroot').classList.contains('on')) $('#scrim').classList.remove('on');
+}
+function drawerShell(m){
+  const b=benchFor(m);
+  const mm=state.meta[m.name];
+  const sz=fmt.bytesFull(m.size);
+  const dt=fmt.date(m.modifiedAt);
+  return '<div class="dr-hd">'+
+    '<div class="nm"><a style="cursor:default">'+esc(m.name)+'</a>'+
+    '<span class="b">'+esc(m.digest.slice(0,24))+'…</span></div>'+
+    '<div style="display:flex;gap:5px;flex:none">'+
+      '<button class="btn icon sm gho" data-bench="'+esc(m.name)+'" title="实测速度">'+ICO.gauge+'</button>'+
+      '<button class="btn icon sm gho" data-copy="'+esc(m.name)+'" title="复制 ollama run 命令">'+ICO.copy+'</button>'+
+      '<button class="btn icon sm gho" data-del="'+esc(m.name)+'" title="删除模型">'+ICO.trash+'</button>'+
+      '<button class="btn icon sm gho" data-close title="关闭">'+ICO.x+'</button>'+
+    '</div></div>'+
+    '<div class="dr-bd" id="drBody">'+drawerBody(m,b,mm,sz,dt)+'</div>';
+}
+function drawerBody(m,b,mm,sz,dt){
+  let h='';
+  // 概览
+  h+='<div class="sec"><div class="sec-t">概览</div><dl class="kv">'+
+    kv('磁盘大小',sz.v+' '+sz.u)+
+    kv('占本机比重',fmt.pctl(m.size,state.totalSize)+'% <span class="u">共 '+fmt.bytes(state.totalSize).v+fmt.bytes(state.totalSize).u+'</span>')+
+    kv('参数量',m.paramLabel+(m.paramB?' <span class="u">≈ '+m.paramB+'B</span>':''))+
+    kv('量化等级',m.quant)+kv('文件格式',m.format)+
+    kv('架构家族',m.family)+kv('上游',m.basename)+
+    kv('显存需求',(function(){
+      const e=vramEstimate(m,mm,VRAM_DEFAULT_CTX);
+      const lv=fitLevel(e,state.gpu);
+      return fmt.bytes(e.total).v+' '+fmt.bytes(e.total).u+
+        ' <span class="u">'+VRAM_DEFAULT_CTX+' 上下文</span> '+
+        (state.gpu&&state.gpu.vramGiB?'<span class="fit '+fitMeta()[lv].cls+
+          '" style="margin-left:4px"><i></i>'+fitMeta()[lv].label+'</span>':'');
+    })(),'txt')+
+    kv('更新时间',dt.s+' <span class="u">'+dt.rel+'</span>')+
+    kv('摘要',m.digest,'txt')+
+    (m.isResident?kv('驻留状态','驻留显存中 '+fmt.bytes(m.vram||0).v+fmt.bytes(m.vram||0).u+
+      (m.expiresAt?' <span class="u">'+fmt.date(m.expiresAt).rel+'到期</span>':''),'txt'):'')+
+    (m.parent?kv('父模型',m.parent,'txt'):'')+
+    '</dl></div>';
+
+  // 能力标签
+  const caps=(mm&&mm.caps)||null;
+  h+='<div class="sec"><div class="sec-t">能力标签</div>';
+  if(!caps) h+='<div class="bk-src" style="margin:0">展开后从模型元数据读取</div>';
+  else if(!caps.length) h+='<div class="bk-src" style="margin:0">该模型未声明任何能力</div>';
+  else h+='<div class="caps">'+caps.map(c=>{
+      const meta=CAP_META[c]||{label:c,ic:'file'};
+      return '<span class="cap'+(c==='thinking'?' rev':'')+'">'+(ICO[meta.ic]||ICO.file)+esc(meta.label)+'</span>';
+    }).join('')+'</div>';
+  h+='</div>';
+
+  // 架构参数
+  h+='<div class="sec"><div class="sec-t">架构参数</div>';
+  if(mm&&mm.loading) h+='<div class="sk" style="height:120px"></div>';
+  else if(mm&&mm.error) h+='<div class="sec-err">'+ICO.warn+'<span>元数据读取失败：'+esc(mm.error)+
+    '<br><button class="btn sm" style="margin-top:8px" data-retry="'+esc(m.name)+'">重试</button></span></div>';
+  else if(mm&&mm.arch){
+    const a=mm.arch;
+    h+='<dl class="kv">';
+    if(a.arch) h+=kv('架构标识',a.arch);
+    if(a.contextLength) h+=kv('上下文长度',fmt.int(a.contextLength),'',a.contextLength>=1000000?'约 '+(a.contextLength/1000).toFixed(0)+'K':'');
+    if(a.slidingWindow) h+=kv('滑动窗口',fmt.int(a.slidingWindow));
+    if(a.blockCount) h+=kv('层数',fmt.int(a.blockCount));
+    if(a.embeddingLength) h+=kv('嵌入维度',fmt.int(a.embeddingLength));
+    if(a.headCount) h+=kv('注意力头',a.headCount+' <span class="u">KV '+a.headCountKV+'</span>');
+    if(a.feedForward) h+=kv('FFN 宽度',fmt.int(a.feedForward));
+    if(a.ropeFreqBase) h+=kv('RoPE 基频',fmt.int(a.ropeFreqBase));
+    if(a.expertCount) h+=kv('专家数',a.expertCount+' <span class="u">每次激活 '+a.expertUsed+'</span>');
+    if(a.parameterCount) h+=kv('实际参数量',fmt.params(a.parameterCount));
+    if(a.quantizationVer) h+=kv('量化版本','GGML v'+a.quantizationVer);
+    if(a.fileType) h+=kv('权重类型',a.fileType);
+    if(a.licenseShort) h+=kv('许可证标识',a.licenseShort);
+    h+='</dl>';
+  } else h+='<div class="bk-src" style="margin:0">该模型未提供架构元数据</div>';
+  h+='</div>';
+
+  // 量化分布（只渲染聚合结果）
+  h+='<div class="sec"><div class="sec-t">量化分布</div>';
+  if(mm&&mm.quantMix&&mm.quantMix.length){
+    h+='<div class="qmix">'+mm.quantMix.map((q,i)=>
+      '<i style="flex:'+q.n+';background:'+famColor(q.type,50+i*7)+'" title="'+esc(q.type)+'：'+q.n+' 个张量（'+q.pct.toFixed(1)+'%）"></i>').join('')+'</div>'+
+      '<div class="qlg">'+mm.quantMix.map((q,i)=>
+        '<span><b style="background:'+famColor(q.type,50+i*7)+'"></b>'+esc(q.type)+' · '+q.n+' · '+
+        q.pct.toFixed(1)+'%</span>').join('')+'</div>'+
+      '<div class="bk-src">共 '+(mm.tensorCount||0)+' 个张量，按精度类型聚合统计</div>';
+  } else h+='<div class="bk-src" style="margin:0">展开后显示各精度张量的分布</div>';
+  h+='</div>';
+
+  // 显存占用
+  h+='<div class="sec"><div class="sec-t">显存占用</div>'+vramSection(m,mm)+'</div>';
+
+  // 官方 benchmark
+  h+='<div class="sec"><div class="sec-t">官方 benchmark</div>'+benchDetail(m,b)+'</div>';
+
+  // 许可证
+  h+='<div class="sec"><div class="sec-t">许可证</div>';
+  if(mm&&mm.license){
+    h+='<div class="lic"><pre class="lic-txt">'+esc(mm.license.slice(0,1400))+'</pre></div>'+
+       '<div class="lic-btns"><button class="btn sm" data-lic>展开全文</button>'+
+       (mm.license.length>1400?'<span class="bk-src" style="margin:0;align-self:center">共 '+
+        (mm.license.length/1024).toFixed(1)+' KB</span>':'')+'</div>';
+  } else h+='<div class="bk-src" style="margin:0">展开后显示许可证全文（部分模型约 11 KB）</div>';
+  h+='</div>';
+  return h;
+}
+/* 抽屉内的显存占用分区：构成条 + 明细 + 上下文影响条形图 */
+function vramSection(m,mm){
+  const est=vramEstimate(m,mm,VRAM_DEFAULT_CTX);
+  const lv=fitLevel(est,state.gpu);
+  const fm=fitMeta()[lv];
+  const gpu=state.gpu;
+  let h='';
+
+  // 本机显卡
+  if(gpu&&gpu.vramGiB){
+    h+='<dl class="kv" style="margin-bottom:var(--s3)">'+
+      kv('本机显卡',esc(gpu.name||'未命名')+' <span class="u">'+gpu.vramGiB+' GiB</span>','txt')+
+      '</dl>';
+  } else {
+    h+='<div class="bk-note" style="background:var(--vram-soft);border-color:#ddd6fe;color:var(--vram-ink)">'+
+      ICO.gpu+' 尚未配置显卡信息，<b>无法判断能否完整装入显存</b>。'+
+      '在右上角设置中填写型号与容量后，此处会显示适配判断。</div>';
+  }
+
+  if(!mm){
+    return h+'<div class="bk-src" style="margin-top:var(--s3)">模型元数据载入中…</div>';
+  }
+  if(!mm.arch){
+    return h+'<div class="bk-src" style="margin-top:var(--s3)">'+
+      '该模型未提供架构元数据，无法计算 KV cache，仅能估算权重占用。</div>';
+  }
+
+  // 构成条：权重 / KV / 开销
+  const w=est.weight, k=est.kv, o=est.overhead, t=est.total||1;
+  h+='<div class="vrcomp">'+
+    '<i class="w" style="flex:'+w+'" title="权重 '+fmt.bytes(w).v+fmt.bytes(w).u+'"></i>'+
+    (est.kvAvailable?'<i class="k" style="flex:'+k+'" title="KV cache '+fmt.bytes(k).v+fmt.bytes(k).u+'"></i>':'')+
+    '<i class="o" style="flex:'+o+'" title="运行时开销 '+fmt.bytes(o).v+fmt.bytes(o).u+'"></i>'+
+    '</div>'+
+    '<div class="vrcomp-lg" style="margin-bottom:var(--s4)">'+
+    '<span><b class="w"></b>权重 '+fmt.bytes(w).v+fmt.bytes(w).u+'</span>'+
+    (est.kvAvailable?'<span><b class="k"></b>KV cache '+fmt.bytes(k).v+fmt.bytes(k).u+'</span>':'')+
+    '<span><b class="o"></b>开销 '+fmt.bytes(o).v+fmt.bytes(o).u+'</span>'+
+    '</div>';
+
+  // 明细
+  h+='<dl class="kv">';
+  h+=kv('权重占用',fmt.bytes(w).v+' '+fmt.bytes(w).u,'txt','来自 /api/tags');
+  if(est.isEmbedding){
+    h+=kv('KV cache','不适用','txt','嵌入模型仅含编码器');
+  }else if(est.kvAvailable){
+    h+=kv('KV cache',fmt.bytes(k).v+' '+fmt.bytes(k).u,'txt',
+      VRAM_DEFAULT_CTX+' 上下文');
+  }else{
+    h+=kv('KV cache','无法计算','na',null);
+  }
+  h+=kv('运行时开销',fmt.bytes(o).v+' '+fmt.bytes(o).u+' <span class="u">按权重 5% 估算</span>','txt');
+  h+=kv('合计需求',fmt.bytes(est.total).v+' '+fmt.bytes(est.total).u,'txt',
+    VRAM_DEFAULT_CTX+' 上下文');
+  h+=kv('适配判断',
+    '<span class="fit '+fm.cls+'"><i></i>'+fm.label+'</span>'+
+    (gpu&&gpu.vramGiB?' <span class="u">占用 '+
+      (est.total/(gpu.vramGiB*1073741824)*100).toFixed(0)+'%</span>':''),'txt');
+  h+='</dl>';
+
+  // 溢出说明
+  if(gpu&&gpu.vramGiB&&lv==='overflow'){
+    const over=est.total-gpu.vramGiB*1073741824;
+    h+='<div class="bk-note warn" style="margin-top:var(--s3)">'+ICO.warn+
+      ' 超出本机显存 <b>'+fmt.bytes(over).v+fmt.bytes(over).u+
+      '</b>。超出部分将回落至系统内存运行，推理速度会显著下降'+
+      '（通常慢 3–10 倍，取决于 PCIe 带宽与内存带宽）。</div>';
+  }
+
+  // 上下文影响
+  if(!est.isEmbedding&&est.kvAvailable){
+    const ser=vramSeries(m,mm);
+    const cap=(gpu&&gpu.vramGiB)?gpu.vramGiB*1073741824:null;
+    const maxTotal=Math.max.apply(null,ser.map(x=>x.total).concat([cap||0]));
+    const maxCtx=mm.arch.contextLength;
+    h+='<div class="sec-t" style="margin-top:var(--s4)">上下文影响</div>'+
+      '<div class="ctxbars">';
+    ser.forEach(x=>{
+      if(maxCtx&&x.ctx>maxCtx) return;   // 超出模型声明的最大上下文不显示
+      const over=cap?x.total>cap:false;
+      const cur=x.ctx===VRAM_DEFAULT_CTX;
+      const b=fmt.bytes(x.total);
+      h+='<div class="ctxbar'+(over?' over':'')+(cur?' cur':'')+'">'+
+        '<span class="ck">'+(x.ctx>=1024?(x.ctx/1024)+'K':x.ctx)+'</span>'+
+        '<span class="ct"><i style="width:'+(x.total/maxTotal*100).toFixed(1)+'%"></i></span>'+
+        '<span class="cv">'+b.v+' '+b.u+(over?' ⚠':'')+'</span>'+
+        '</div>';
+    });
+    h+='</div>'+
+      '<div class="ctxlegend">KV cache 随上下文长度<b>线性增长</b>，此为理论估算值。'+
+      (cap?'<br>⚠ 标记表示超出 '+gpu.vramGiB+' GiB 显存上限。':'')+
+      (maxCtx?'<br>本模型最大上下文 '+fmt.int(maxCtx)+'（'+fmt.short(String(maxCtx),6)+'）。':'')+
+      '</div>';
+  }
+  return h;
+}
+function kv(k,v,cls,u){
+  return '<dt>'+esc(k)+'</dt><dd class="'+(cls||'')+'">'+v+(u?'<span class="u">'+u+'</span>':'')+'</dd>';
+}
+function benchDetail(m,b){
+  if(b.match==='none'||!b.entry){
+    return '<div class="bk-note warn">'+ICO.info+' 未收录：未找到该模型官方公开发布的 benchmark 数值。'+
+      '此处不显示任何推测或代用分数。</div>';
+  }
+  const e=b.entry;
+  let h='';
+  if(b.match==='fuzzy')
+    h+='<div class="bk-note">'+ICO.warn+' 近似匹配：本地 tag <b>'+esc(m.tag)+'</b> 与条目 <b>'+
+       esc(e.key)+'</b> 为包含关系匹配，非精确命中。请留意映射准确性。</div>';
+  if(e.verified===false)
+    h+='<div class="bk-note warn">'+ICO.warn+' 数值待核：未取得可引用的官方文本数值，故不显示分数。</div>';
+  h+='<div style="font-size:var(--fs-sm);margin-bottom:10px"><b>'+esc(e.displayName)+'</b>'+
+     (e.variant?' <span style="color:var(--text-3)">'+esc(e.variant)+'</span>':'')+
+     '<br><span style="color:var(--text-3);font-size:var(--fs-xs)">'+esc(e.org)+
+     (e.license?' · '+esc(e.license):'')+
+     (e.contextLength?' · 上下文 '+fmt.int(e.contextLength):'')+
+     (e.isEmbedding?' · 嵌入模型':'')+'</span></div>';
+
+  if(e.isEmbedding&&e.embedding){
+    h+='<div class="bkgrp"><div class="bkgrp-t">嵌入能力</div><dl class="kv">'+
+      kv('向量维度',e.embedding.dimensions)+
+      (e.embedding.matryoshka?kv('Matryoshka 截断',e.embedding.matryoshka.join(' / ')):'')+
+      (e.embedding.mteb?kv('MTEB 得分',e.embedding.mteb):'')+
+      '</dl></div>';
+    h+='<div class="bk-note">'+ICO.info+' 嵌入模型不参评生成类 benchmark，此处展示其检索能力指标。'+
+      (e.note?'<br><br>'+esc(e.note):'')+'</div>';
+    return h+'</div>';
+  }
+
+  let any=false;
+  for(const g of BK_GROUPS){
+    const sc=e.scores[g.key]||{};
+    const ks=Object.keys(sc);
+    if(!ks.length) continue;
+    const has=ks.some(k=>sc[k]!=null);
+    if(!has) continue;
+    any=true;
+    h+='<div class="bkgrp"><div class="bkgrp-t">'+esc(g.label)+'</div><table class="bkd"><thead><tr>'+
+       '<th>基准</th><th class="r">得分</th></tr></thead><tbody>';
+    for(const k of ks){
+      const v=sc[k];
+      h+='<tr><td>'+esc(k)+'</td><td class="r'+(v==null?' na':'')+'">'+
+         (v==null?'未公布':v.toFixed(1))+'</td></tr>';
+    }
+    h+='</tbody></table></div>';
+  }
+  if(!any) h+='<div class="bk-note warn">该条目已收录元信息，但没有可展示的分数。</div>';
+  if(e.note) h+='<div class="bk-note">'+ICO.warn+' <b>口径说明</b><br>'+esc(e.note)+'</div>';
+  h+='<div class="bk-src">来源：<a href="'+esc(e.source)+'" target="_blank" rel="noopener">'+esc(e.source)+'</a>'+
+     '<br>核实日期：'+esc(BENCHMARKS.meta.lastVerified)+' · '+esc(BENCHMARKS.meta.note)+'</div>';
+  return h;
+}
+
+/* show 懒加载：点开抽屉才请求，避免首屏 11 个大 JSON 串行阻塞 */
+async function loadMeta(name){
+  if(state.meta[name]&&!state.meta[name].error) return;
+  state.meta[name]={loading:true,error:null};
+  if(state.drawer.name===name) redrawDrawer();
+  try{
+    const raw=await API.show(name);
+    const mi=raw.model_info||{};
+    state.meta[name]={
+      loading:false, error:null,
+      arch:extractArch(mi),
+      caps:Array.isArray(raw.capabilities)?raw.capabilities:[],
+      license:raw.license||'',
+      quantMix:quantMix(raw.tensors),
+      tensorCount:Array.isArray(raw.tensors)?raw.tensors.length:0,
+      raw:{ parameters:raw.parameters||'', template:raw.template||'' }
+    };
+  }catch(e){
+    state.meta[name]={loading:false,error:e.message||String(e)};
+  }
+  if(state.drawer.name===name) redrawDrawer();
+  if(state.ui.caps.size||state.ui.q) renderAll();
+}
+function redrawDrawer(){
+  const n=state.drawer.name; if(!n) return;
+  const m=state.models.find(x=>x.name===n); if(!m) return;
+  const body=$('#drBody'); if(!body) return;
+  const b=benchFor(m), mm=state.meta[n], sz=fmt.bytesFull(m.size), dt=fmt.date(m.modifiedAt);
+  body.innerHTML=drawerBody(m,b,mm,sz,dt);
+  const lic=body.querySelector('[data-lic]');
+  if(lic) lic.addEventListener('click',()=>{
+    const box=body.querySelector('.lic'); const open=box.classList.toggle('open');
+    lic.textContent=open?'收起':'展开全文';
+  });
+  const rt=body.querySelector('[data-retry]');
+  if(rt) rt.addEventListener('click',()=>{
+    delete state.meta[n]; loadMeta(n);
+  });
+}
+
+/* ==========================================================================
+   13. 实测跑分引擎
+   ========================================================================== */
+class BenchSkip extends Error{}
+const Bench={
+  async runOne(row,onProg){
+    if(isEmbedRow(row))
+      throw new BenchSkip('嵌入模型不产出文本生成结果，不适用生成测速（可参考其 MTEB 检索得分）');
+    const caps=(state.meta[row.name]&&state.meta[row.name].caps)||[];
+    const thinking=caps.indexOf('thinking')>=0;
+    // 预热：仅触发加载，不计入结果
+    await this._once(row,32);
+    const s=[];
+    for(let i=0;i<BENCH_RUNS;i++){
+      s.push(await this._once(row,BENCH_MAX_TOKENS));
+      if(onProg) onProg(i+1,BENCH_RUNS);
+    }
+    const med=a=>{const x=a.slice().sort((p,q)=>p-q);return x[x.length>>1];};
+    return {
+      name:row.name, ttftMs:med(s.map(x=>x.ttftMs)), loadMs:med(s.map(x=>x.loadMs)),
+      tps:med(s.map(x=>x.tps)), promptTps:med(s.map(x=>x.promptTps)),
+      runs:BENCH_RUNS, evalCount:s[s.length-1].evalCount, thinking:thinking,
+      ts:Date.now(), promptHash:BENCH_PROMPT_HASH, gpu:null
+    };
+  },
+  async _once(row,maxTokens){
+    const t0=performance.now();
+    let ttft=null, last=null;
+    const body={ model:row.name, stream:true, prompt:BENCH_PROMPT,
+      options:{ num_predict:maxTokens, temperature:0, seed:42 } };
+    for await(const d of API.generate(body)){
+      if(ttft===null&&d.response&&d.response.length) ttft=performance.now()-t0;
+      if(d.done) last=d;
+    }
+    if(!last||!last.done) throw new Error('生成流意外结束，未收到完成标记');
+    if(ttft===null) ttft=performance.now()-t0;
+    const ev=last.eval_duration||0, evc=last.eval_count||0;
+    const pev=last.prompt_eval_duration||0, pevc=last.prompt_eval_count||0;
+    return {
+      ttftMs:ttft, loadMs:(last.load_duration||0)/1e6,
+      tps: ev>0? evc/(ev/1e9) : null,
+      promptTps: pev>0? pevc/(pev/1e9) : null,
+      evalCount:evc, doneReason:last.done_reason||''
+    };
+  },
+  save(row,data){
+    const all=store.get(LS.BENCH,{});
+    all[row.digest]=data;
+    if(!store.set(LS.BENCH,all))
+      toast('warn','实测数据未能持久化','当前浏览器禁用了本地存储，数据仅在本次会话有效');
+  },
+  clearAll(){
+    if(!store.set(LS.BENCH,{})) return false;
+    return true;
+  }
+};
+
+async function runBenchOne(name){
+  const row=state.models.find(m=>m.name===name); if(!row) return;
+  if(!state.meta[name]) await loadMeta(name);
+  if(state.bench.running){ toast('warn','已有测速进行中','Ollama 对生成请求串行调度，并发测速会互相拖慢并污染数据'); return; }
+  state.bench.running=true; state.bench.cur=name;
+  renderAll(); if(state.drawer.name===name) redrawDrawer();
+  try{
+    const data=await Bench.runOne(row);
+    Bench.save(row,data);
+    toast('ok','实测完成：'+name,
+      fmt.tps(data.tps)+' tok/s · 首字 '+fmt.ms(data.ttftMs)+
+      (data.thinking?' · 含思考 token':''));
+  }catch(e){
+    if(e instanceof BenchSkip) toast('warn','已跳过：'+name,e.message);
+    else toast('err','实测失败：'+name,e.message||String(e));
+  }finally{
+    state.bench.running=false; state.bench.cur=null;
+    renderAll(); if(state.drawer.name) redrawDrawer();
+  }
+}
+
+async function runBenchAll(){
+  if(state.bench.running){
+    if(state.bench.abort) state.bench.abort.abort();
+    return;
+  }
+  const list=sel.rows().filter(m=>!isEmbedRow(m));
+  if(!list.length){ toast('info','没有可测速的模型','当前筛选结果中的模型均为嵌入类型或列表为空'); return; }
+  const ac=new AbortController();
+  state.bench.running=true; state.bench.abort=ac; state.bench.queue=list.map(m=>m.name);
+  let done=0,ok=0,skip=0,fail=0;
+  renderHeader();
+  const t=toast('info','批量实测已启动',
+    '共 '+list.length+' 个模型 · 固定提示词 · '+BENCH_RUNS+' 次取中位 · 串行执行（'+list.length+'×约 20–60 秒）',600000);
+  for(const name of state.bench.queue){
+    if(ac.signal.aborted) break;
+    const row=state.models.find(m=>m.name===name);
+    state.bench.cur=name; renderAll(); if(state.drawer.name===name) redrawDrawer();
+    try{
+      const data=await Bench.runOne(row);
+      Bench.save(row,data); ok++;
+    }catch(e){
+      if(e instanceof BenchSkip) skip++;
+      else { fail++; toast('err','实测失败：'+name,e.message||String(e)); }
+    }
+    done++;
+  }
+  state.bench.running=false; state.bench.cur=null; state.bench.abort=null;
+  state.benchFailing=false;
+  renderAll(); if(state.drawer.name) redrawDrawer();
+  if(t) t.remove();
+  if(done) toast(ok?'ok':'warn','批量实测结束',
+    '成功 '+ok+' · 跳过 '+skip+'（嵌入模型）'+(fail?' · 失败 '+fail:''));
+}
+async function doBenchTick(){
+  const all=store.get(LS.BENCH,{});
+  for(const m of state.models){
+    if(all[m.digest]&&all[m.digest].promptHash!==BENCH_PROMPT_HASH) delete all[m.digest];
+  }
+  store.set(LS.BENCH,all);
+}
+
+/* ==========================================================================
+   14. 模态框
+   ========================================================================== */
+function openModal(node){
+  const r=$('#mroot');
+  r.innerHTML=''; r.appendChild(node); r.classList.add('on');
+  $('#scrim').classList.add('on');
+  const f=node.querySelector('input,textarea,button.pri');
+  if(f) setTimeout(()=>f.focus(),80);
+}
+function closeModal(){
+  const r=$('#mroot');
+  r.classList.remove('on');
+  if(state.modal&&state.modal.onClose) state.modal.onClose();
+  state.modal=null;
+  setTimeout(()=>{ if(!r.classList.contains('on')) r.innerHTML=''; },240);
+  if(!$('#drawer').classList.contains('on')) $('#scrim').classList.remove('on');
+}
+function modalShell(cls,ic,title,desc,body,foot){
+  const m=el('div','modal');
+  m.innerHTML='<div class="mo-hd '+cls+'"><div class="mi">'+ic+'</div>'+
+    '<div style="flex:1;min-width:0"><h2>'+esc(title)+'</h2>'+
+    (desc?'<p>'+desc+'</p>':'')+'</div></div>'+
+    '<div class="mo-bd">'+body+'</div>'+
+    '<div class="mo-ft">'+foot+'</div>';
+  return m;
+}
+
+/* ---- 删除确认：需键入完整模型名 ---- */
+function confirmDelete(name){
+  const m=state.models.find(x=>x.name===name); if(!m) return;
+  const sz=fmt.bytes(m.size);
+  const body=
+    '<div class="warnbox">'+ICO.warn+'<div><b>此操作不可撤销</b><br>'+
+      '将永久删除模型文件 <b>'+esc(sz.v+' '+sz.u)+'</b>（'+fmt.int(m.size)+' 字节），'+
+      '占本机模型总量 '+fmt.pctl(m.size,state.totalSize)+'%。'+
+      (m.isResident?'<br><br>该模型当前驻留显存中，删除后会自动卸载。':'')+
+      '</div></div>'+
+    '<dl class="kv">'+kv('模型名',esc(m.name),'txt')+kv('架构',esc(m.family))+
+      kv('量化',esc(m.quant))+
+      kv('摘要',esc(m.digest.slice(0,24))+'…','txt')+'</dl>'+
+    '<div class="fld"><label for="delIn">请输入完整模型名以确认</label>'+
+    '<input id="delIn" placeholder="'+esc(m.name)+'" autocomplete="off" spellcheck="false">'+
+    '<div class="hint">删除后可通过 <code>ollama pull '+esc(m.name)+'</code> 重新下载</div></div>';
+  const foot='<button class="btn" data-cancel>取消</button>'+
+    '<button class="btn dgr solid" id="delGo" disabled>永久删除 '+sz.v+' '+sz.u+'</button>';
+  const node=modalShell('dgr',ICO.trash,'删除模型','该模型及其全部权重文件将从本机移除。',body,foot);
+  openModal(node);
+  const inp=node.querySelector('#delIn'), go=node.querySelector('#delGo');
+  const chk=()=>{ go.disabled = inp.value.trim()!==m.name; };
+  inp.addEventListener('input',chk);
+  inp.addEventListener('keydown',e=>{ if(e.key==='Enter'&&!go.disabled) go.click(); });
+  node.querySelector('[data-cancel]').addEventListener('click',closeModal);
+  go.addEventListener('click',async()=>{
+    go.disabled=true; go.innerHTML='<span class="spin"></span> 删除中…';
+    try{
+      await API.remove(m.name);
+      closeModal(); closeDrawer();
+      toast('ok','已删除：'+m.name,'释放 '+sz.v+' '+sz.u+' 磁盘空间');
+      await loadData();
+    }catch(e){ go.disabled=false; go.textContent='永久删除 '+sz.v+' '+sz.u;
+      toast('err','删除失败',e.message||String(e)); }
+  });
+}
+
+/* ---- 拉取模型：流式进度 ---- */
+const PULL_SUGGEST=['qwen3:8b','gemma3:4b','llama3.2:3b','deepseek-r1:7b','qwen2.5-coder:7b','nomic-embed-text'];
+function confirmPull(){
+  const body='<div class="warnbox acc">'+ICO.down+'<div>从 Ollama 官方仓库下载模型到本机。'+
+    '大模型可能占用数十 GB 磁盘空间，耗时可达数十分钟。</div></div>'+
+    '<div class="fld"><label for="pullIn">模型名称</label>'+
+    '<input id="pullIn" placeholder="例如 qwen3:8b" autocomplete="off" spellcheck="false">'+
+    '<div class="hint">等效命令：<code>ollama pull &lt;名称&gt;</code></div></div>'+
+    '<div class="sugg">'+PULL_SUGGEST.map(s=>'<button data-sug="'+esc(s)+'">'+esc(s)+'</button>').join('')+'</div>';
+  const foot='<button class="btn" data-cancel>取消</button>'+
+    '<button class="btn pri" id="pullGo">开始下载</button>';
+  const node=modalShell('acc',ICO.down,'拉取模型','从官方仓库下载新的模型文件。',body,foot);
+  openModal(node);
+  const inp=node.querySelector('#pullIn'), go=node.querySelector('#pullGo');
+  const sync=()=>{ go.disabled=!inp.value.trim(); };
+  inp.addEventListener('input',sync);
+  node.querySelectorAll('[data-sug]').forEach(b=>b.addEventListener('click',()=>{
+    inp.value=b.dataset.sug; sync(); inp.focus();
+  }));
+  node.querySelector('[data-cancel]').addEventListener('click',closeModal);
+  const go2=async()=>{
+    const name=inp.value.trim(); if(!name) return;
+    body_progress(node,name);
+    try{
+      await doPull(node,name);
+      closeModal();
+      toast('ok','拉取完成：'+name,'新模型已加入本机列表');
+      await loadData();
+    }catch(e){
+      if(e&&e.__abort) toast('warn','已中断下载',name+'（已下载的分片会保留，下次拉取可续传）');
+      else toast('err','拉取失败：'+name,e&&e.message?e.message:String(e));
+    }
+  };
+  go.addEventListener('click',go2);
+  inp.addEventListener('keydown',e=>{ if(e.key==='Enter'&&inp.value.trim()) go2(); });
+}
+function body_progress(node,name){
+  const bd=node.querySelector('.mo-bd');
+  bd.innerHTML='<dl class="kv">'+kv('模型',esc(name),'txt')+'</dl>'+
+    '<div class="prog"><div class="pr-top"><span class="st" id="prSt">正在获取 manifest…</span>'+
+    '<span class="pc" id="prPc"></span></div>'+
+    '<div class="pr-track"><div class="pr-fill" id="prFill"></div></div>'+
+    '<div class="pr-sub" id="prSub"></div></div><div id="prErr"></div>';
+  const ft=node.querySelector('.mo-ft');
+  ft.innerHTML='<button class="btn" id="prCancel">中断下载</button>';
+  ft.querySelector('#prCancel').addEventListener('click',()=>{
+    if(state.modal&&state.modal.ac) state.modal.ac.abort();
+  });
+}
+async function doPull(node,name){
+  const ac=new AbortController();
+  state.modal={ac:ac,onClose:()=>{}};
+  const st=node.querySelector('#prSt'), pc=node.querySelector('#prPc'),
+        fill=node.querySelector('#prFill'), sub=node.querySelector('#prSub'),
+        errBox=node.querySelector('#prErr');
+  let lastPct=0, segs=0;
+  try{
+    for await(const d of API.pull(name,ac.signal)){
+      if(d.error) throw new Error(d.error);
+      const s=d.status||'';
+      if(s==='pulling manifest'){ st.textContent='正在获取 manifest…'; fill.classList.add('ind'); }
+      else if(s.indexOf('pulling')===0){
+        fill.classList.remove('ind');
+        const pct=d.total? Math.round(d.completed/d.total*100) : 0;
+        if(pct>lastPct){ lastPct=pct; }
+        st.textContent='正在下载分片';
+        pc.textContent=(d.total? pct+'%' : '');
+        fill.style.width=Math.max(pct,2)+'%';
+        if(d.digest){
+          sub.textContent='分片 '+(d.digest||'').slice(0,12)+
+            (d.total?'  ·  '+fmt.bytes(d.completed).v+fmt.bytes(d.completed).u+' / '+
+              fmt.bytes(d.total).v+fmt.bytes(d.total).u:'');
+        }
+        segs++;
+      }
+      else if(s.indexOf('verifying')===0){
+        st.textContent='正在校验 SHA256 摘要…'; fill.classList.add('ind'); pc.textContent='';
+        sub.textContent='分片 '+segs+' 个';
+      }
+      else if(s.indexOf('writing')===0){ st.textContent='正在写入 manifest…'; fill.classList.add('ind'); }
+      else if(s==='success'){ st.textContent='下载完成'; fill.classList.add('ind'); fill.style.width='100%'; pc.textContent='100%'; }
+      else st.textContent=s;
+    }
+    return true;
+  }catch(e){
+    if(ac.signal.aborted){ const a=new Error('aborted'); a.__abort=true; throw a; }
+    if(errBox) errBox.innerHTML='<div class="pr-err">'+ICO.warn+' '+esc(e.message||String(e))+'</div>';
+    throw e;
+  }
+}
+
+/* ---- 设置 ---- */
+function confirmCfg(){
+  const g=state.gpu||{name:'',vramGiB:null};
+  const body=
+    '<div class="sec-t" style="margin-bottom:8px">显卡配置</div>'+
+    '<div class="warnbox acc">'+ICO.gpu+'<div>浏览器无法直接读取本机显卡信息，'+
+      '这里手动填写一次后会保存在浏览器本地，用于判断各模型能否完整装入显存。'+
+      '显存需求按「权重 + KV cache + 5% 开销」理论估算，仅供参考。</div></div>'+
+    '<div class="fld"><label for="gpuName">显卡型号</label>'+
+    '<input id="gpuName" value="'+esc(g.name||'')+'" placeholder="例如 RTX 4070 Ti SUPER" autocomplete="off" spellcheck="false">'+
+    '<div class="sugg">'+GPU_PRESETS.filter(x=>x.vramGiB).map(x=>
+      '<button data-gpu="'+esc(x.name)+'|'+x.vramGiB+'">'+esc(x.name)+' · '+x.vramGiB+'G</button>').join('')+
+    '</div></div>'+
+    '<div class="fld"><label for="gpuVram">显存容量（GB）</label>'+
+    '<input id="gpuVram" type="number" min="1" max="1024" step="0.5" value="'+
+      (g.vramGiB||'')+'" placeholder="16">'+
+    '<div class="hint">填标称容量即可（如 16 表示 16 GB）。苹果统一内存机型请填可分配给 GPU 的部分。</div></div>'+
+    '<div class="sec-t" style="margin:20px 0 8px">数据源</div>'+
+    '<div class="fld"><label for="cfgIn">Ollama API 地址</label>'+
+    '<input id="cfgIn" value="'+esc(API.base)+'" autocomplete="off" spellcheck="false">'+
+    '<div class="hint">默认为 <code>http://127.0.0.1:11434</code>。若跑在自定义端口或远程主机，改成对应地址。</div></div>'+
+    '<div class="warnbox">'+ICO.info+'<div>本页面通过浏览器直连 Ollama API。Ollama 的跨域策略是白名单，'+
+      '只放行 <code>localhost</code> / <code>127.0.0.1</code> 等来源，因此必须通过本地 http 服务打开，'+
+      '不能直接双击 HTML 文件。本目录下的 <code>start-board.bat</code> 已自动处理。</div></div>';
+  const foot='<button class="btn" id="cfgClr">清除实测数据</button>'+
+    '<button class="btn" id="cfgClrGpu">清除显卡配置</button>'+
+    '<span style="flex:1"></span>'+
+    '<button class="btn" data-cancel>取消</button>'+
+    '<button class="btn pri" id="cfgGo">保存</button>';
+  const node=modalShell('acc',ICO.cog,'设置','调整显卡配置、API 地址或清理本地缓存。',body,foot);
+  openModal(node);
+  node.querySelector('[data-cancel]').addEventListener('click',closeModal);
+  // 速查：点一次同时填好型号与容量
+  const nameIn=node.querySelector('#gpuName'), vramIn=node.querySelector('#gpuVram');
+  node.querySelectorAll('[data-gpu]').forEach(b=>b.addEventListener('click',()=>{
+    const p=b.dataset.gpu.split('|');
+    nameIn.value=p[0]; vramIn.value=p[1];
+    nameIn.dispatchEvent(new Event('input')); vramIn.dispatchEvent(new Event('input'));
+  }));
+  node.querySelector('#cfgClr').addEventListener('click',()=>{
+    if(Bench.clearAll()){ toast('ok','实测数据已清除','所有本机跑分记录已删除'); renderAll(); }
+    else toast('err','清除失败','浏览器禁用了本地存储');
+  });
+  node.querySelector('#cfgClrGpu').addEventListener('click',()=>{
+    state.gpu={name:'',vramGiB:null};
+    try{ localStorage.removeItem(LS.GPU); }catch(e){}
+    closeModal(); renderAll();
+    toast('info','显卡配置已清除','显存适配判断将显示为「未配置」');
+  });
+  node.querySelector('#cfgGo').addEventListener('click',async()=>{
+    const nv=nameIn.value.trim();
+    const vv=parseFloat(vramIn.value);
+    if(nv&&!(vv>0)){
+      toast('warn','请填写显存容量','填了型号就需要填写容量（GB），或两者都留空');
+      return;
+    }
+    state.gpu={ name:nv, vramGiB:vv>0?vv:null, updatedAt:Date.now() };
+    if(state.gpu.vramGiB) store.set(LS.GPU,state.gpu);
+    else { try{ localStorage.removeItem(LS.GPU); }catch(e){} }
+    const v=node.querySelector('#cfgIn').value.trim().replace(/\/+$/,'');
+    if(v) API.saveBase(v);
+    closeModal();
+    renderAll();
+    if(state.gpu.vramGiB)
+      toast('ok','显卡配置已保存',
+        state.gpu.name+' · '+state.gpu.vramGiB+' GiB（已存于浏览器本地）');
+  });
+}
+
+/* ==========================================================================
+   15. 连接诊断（全屏 gate）
+   ========================================================================== */
+function showGate(kind,title,desc,cards){
+  const g=$('#gate');
+  g.className='gate on '+kind;
+  let h='<div class="gate-in"><div class="gate-mk">'+ICO.cube+'</div>'+
+    '<h2>'+esc(title)+'</h2><p>'+esc(desc)+'</p>';
+  if(cards) h+='<div class="gate-cards">'+cards+'</div>';
+  h+='<div class="gate-foot">'+
+    '<button class="btn pri" id="gateRetry">'+ICO.refresh+' 重新连接</button>'+
+    (kind?'':'<span class="btn" style="cursor:default">正在检测…</span>')+
+    '</div></div>';
+  g.innerHTML=h;
+  const r=$('#gateRetry');
+  if(r) r.addEventListener('click',()=>loadData());
+}
+function hideGate(){ $('#gate').className='gate'; }
+function gcCard(title,badge,desc,cmds){
+  let h='<div class="gate-card'+(badge==='推荐'?' best':'')+'">'+
+    '<div class="gc-t"><h3>'+esc(title)+'</h3>'+
+    (badge?'<span class="gc-badge'+(badge==='推荐'?'':' alt')+'">'+esc(badge)+'</span>':'')+'</div>'+
+    (desc?'<p>'+esc(desc)+'</p>':'');
+  for(const c of cmds){
+    h+='<div class="gc-cmd"><code>'+esc(c[0])+'</code>'+
+       '<button data-cp="'+esc(c[0])+'" title="复制">'+ICO.copy+'</button></div>';
+  }
+  h+='</div>';
+  return h;
+}
+function corsCards(){
+  return gcCard('通过本地服务打开','推荐','本项目自带启动脚本，双击即可，无需改动 Ollama 设置。',[
+    ['start-board.bat','双击此文件即可启动（自动选择可用端口）'],
+    ['python -m http.server 5173 --bind 127.0.0.1','手动方式：然后访问 http://127.0.0.1:5173/ollama-model-board.html'],
+    ['npx serve . -p 8080','或用 Node：然后访问 http://127.0.0.1:8080/ollama-model-board.html']
+  ]) +
+  gcCard('放行全部来源','一次性','写入环境变量后需完全退出并重启 Ollama 才生效。',[
+    ['setx OLLAMA_ORIGINS "*"','以新开的环境运行 Ollama']
+  ]) +
+  gcCard('自检当前策略','','用于确认 Ollama 返回的跨域响应头。',[
+    ['curl -X OPTIONS http://127.0.0.1:11434/api/version -H "Origin: null" -i',
+     '预期看到 204 与 Access-Control-Allow-Origin；若为 403 则被拒绝']
+  ]);
+}
+async function doCopy(name){
+  const cmd='ollama run '+name;
+  if(await copyText(cmd)) toast('ok','已复制命令',cmd);
+  else toast('err','复制失败','请手动选中命令文本复制');
+}
+
+/* ==========================================================================
+   16. 数据加载
+   ========================================================================== */
+async function loadData(){
+  state.status='loading'; renderHeader();
+  try{
+    const v=await API.version();
+    state.version=(v&&v.version)?v.version:null;
+  }catch(e){
+    const k=API.classifyError(e);
+    if(k==='cors'){
+      state.status='cors'; renderHeader();
+      showGate('warn','浏览器跨域限制',
+        '当前页面以 file:// 方式打开，浏览器发送的来源标识是 Origin: null，'+
+        '而 Ollama 的跨域白名单不接受该来源，因此请求被拒绝。这不是配置错误，'+
+        '改用本地 http 服务打开即可正常访问。',
+        corsCards());
+      return;
+    }
+    if(k==='timeout'){
+      state.status='error'; renderHeader();
+      showGate('err','连接超时',
+        'Ollama 在 '+API.base+' 未在预期时间内响应，请确认服务状态后重试。',null);
+      return;
+    }
+    state.status='error'; renderHeader();
+    showGate('err','无法连接 Ollama',
+      '未能连上 '+API.base+'。请确认 Ollama 正在运行；如未启动，可执行下面的命令。',
+      gcCard('启动 Ollama 服务','',null,[
+        ['ollama serve','前台启动服务'],
+        ['ollama serve','若已安装为后台服务，检查托盘图标是否运行']
+      ]));
+    return;
+  }
+  hideGate();
+  let tags, ps;
+  try{ tags=await API.tags(); }catch(e){
+    state.status='error'; renderHeader();
+    showGate('err','读取模型列表失败',
+      '已连接 Ollama '+(state.version||'')+'，但 /api/tags 返回错误：'+esc(e.message||String(e)),null);
+    return;
+  }
+  try{ ps=await API.ps(); }catch(e){ ps={models:[]}; }
+
+  const psMap={};
+  (ps.models||[]).forEach(m=>{ psMap[m.name]=m; psMap[m.model]=m; });
+
+  const prevNames=state.models.map(m=>m.name);
+  const prevDigests={}; state.models.forEach(m=>{ prevDigests[m.name]=m.digest; });
+  state.models=(tags.models||[]).map(t=>normalize(t,psMap));
+  state.ps=ps;
+  state.totalSize=state.models.reduce((a,m)=>a+m.size,0);
+  state.newNames=new Set(state.models.filter(m=>!prevNames.includes(m.name)).map(m=>m.name));
+  // digest 变化的模型，其实测数据已按 digest 键自动失效
+  state.status='ready';
+  await doBenchTick();
+  renderAll();
+  if(state.newNames.size) setTimeout(()=>{ state.newNames.clear(); renderAll(); },2400);
+}
+
+/* ==========================================================================
+   17. 事件绑定
+   ========================================================================== */
+function bind(){
+  // 顶栏
+  $('#btnRefresh').addEventListener('click',()=>loadData());
+  $('#btnPull').addEventListener('click',confirmPull);
+  $('#btnCfg').addEventListener('click',confirmCfg);
+  $('#btnBench').addEventListener('click',runBenchAll);
+  $$('.seg button').forEach(b=>b.addEventListener('click',()=>{
+    state.ui.view=b.dataset.view;
+    store.set(LS.PREFS,{view:state.ui.view,sort:state.ui.sort});
+    renderAll();
+  }));
+  // 搜索
+  const q=$('#q'); let tmr=null;
+  q.addEventListener('input',()=>{
+    $('#searchWrap').classList.toggle('has',!!q.value);
+    clearTimeout(tmr);
+    tmr=setTimeout(()=>{ state.ui.q=q.value; renderAll(); },120);
+  });
+  $('#qClr').addEventListener('click',()=>{ q.value=''; state.ui.q=''; renderAll(); q.focus(); });
+  $('#btnReset').addEventListener('click',resetFilters);
+
+  // 内容区事件委托
+  document.addEventListener('click',e=>{
+    const o=e.target.closest('[data-open]');
+    if(o){ openDrawer(o.dataset.open); return; }
+    const b=e.target.closest('[data-bench]');
+    if(b){ runBenchOne(b.dataset.bench); return; }
+    const c=e.target.closest('[data-copy]');
+    if(c){ doCopy(c.dataset.copy); return; }
+    const d=e.target.closest('[data-del]');
+    if(d){ confirmDelete(d.dataset.del); return; }
+    const cp=e.target.closest('[data-cp]');
+    if(cp){ copyText(cp.dataset.cp)
+      .then(ok=>ok?toast('ok','已复制到剪贴板',cp.dataset.cp):toast('err','复制失败','请手动复制'));
+      return; }
+  });
+
+  // 遮罩 / 键盘
+  $('#scrim').addEventListener('click',()=>{ closeModal(); closeDrawer(); });
+  $('#mroot').addEventListener('click',e=>{ if(e.target===$('#mroot')) closeModal(); });
+  document.addEventListener('keydown',e=>{
+    if(e.key==='Escape'){
+      if($('#mroot').classList.contains('on')) closeModal();
+      else if($('#drawer').classList.contains('on')) closeDrawer();
+    }
+    if(e.key==='/'&&!/^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)){
+      e.preventDefault(); $('#q').focus();
+    }
+  });
+  window.addEventListener('resize',()=>{
+    if(window.innerWidth<900&&$('#drawer').classList.contains('on')) closeDrawer();
+  });
+}
+
+/* ==========================================================================
+   18. 启动
+   ========================================================================== */
+function boot(){
+  $('#btnRefresh').innerHTML=ICO.refresh;
+  $('#qClr').innerHTML=ICO.x;
+  $('#btnCfg').innerHTML=ICO.cog;
+  $('#btnPull').innerHTML=ICO.down+' 拉取';
+  $$('.seg button').forEach(b=>{
+    b.innerHTML = b.dataset.view==='table' ? ICO.table+' 表格' : ICO.grid+' 卡片';
+  });
+  // 恢复偏好
+  const p=store.get(LS.PREFS,null);
+  if(p){
+    if(p.view) state.ui.view=p.view;
+    if(Array.isArray(p.sort)&&p.sort.length) state.ui.sort=p.sort;
+  }
+  // 恢复显卡配置
+  const g=store.get(LS.GPU,null);
+  state.gpu = (g&&g.vramGiB>0) ? g : { name:'', vramGiB:null };
+  // 预取全部分类需要 show：仅为识别 capabilities 拉一次且并发受限
+  bind();
+  renderAll();
+  loadData().then(prefetchMeta);
+}
+/* 渐进补齐 capabilities / context：并发 2，逐个失败静默 */
+async function prefetchMeta(){
+  const list=state.models;
+  let i=0;
+  const worker=async()=>{
+    while(i<list.length){
+      const m=list[i++];
+      if(state.meta[m.name]) continue;
+      try{
+        const raw=await API.show(m.name);
+        const mi=raw.model_info||{};
+        state.meta[m.name]={
+          loading:false,error:null, arch:extractArch(mi),
+          caps:Array.isArray(raw.capabilities)?raw.capabilities:[],
+          license:raw.license||'', quantMix:quantMix(raw.tensors),
+          tensorCount:Array.isArray(raw.tensors)?raw.tensors.length:0, raw:{}
+        };
+      }catch(e){ state.meta[m.name]={loading:false,error:e.message||String(e)}; }
+      renderAll();
+    }
+  };
+  await Promise.all([worker(),worker()]);
+}
+
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot);
+else boot();
+
+/* 暴露只读状态与纯函数，便于自动化验证与调试（不参与业务逻辑） */
+window.__board=state;
+window.__api={fmt,benchmarkFor,benchFor,headlineOf,extractArch,quantMix,
+  paramToB,normalize,sel,isEmbedRow,
+  kvCacheBytes,vramEstimate,vramSeries,fitLevel,fitMeta};
+/* 渲染函数同样暴露，供自动化测试检查输出 HTML */
+window.__view={vramTd,fitTd,benchTd,realTd,drawerShell,renderCards,renderTable,COLS};
+
+})();
+</script>
+</body>
+</html>

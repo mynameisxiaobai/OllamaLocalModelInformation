@@ -1,0 +1,18 @@
+{
+   "ExtnDescription": {
+      "Description": "Extension Description",
+      "message": "Đặt Microsoft Bing làm trang chủ mặc định và công cụ tìm kiếm mặc định của bạn"
+   },
+   "ExtnMarket": {
+      "Description": "Market",
+      "message": "vi-vn"
+   },
+   "ExtnName": {
+      "Description": "Extension name",
+      "message": "Trang chủ Microsoft Bing & Công cụ Tìm kiếm"
+   },
+   "HomePage": {
+      "Description": "Homepage",
+      "message": "vi"
+   }
+}

@@ -1,0 +1,18 @@
+{
+   "ExtnDescription": {
+      "Description": "Extension Description",
+      "message": "Nastaviť Microsoft Bing ako predvolenú domovskú stránku a predvolený vyhľadávací nástroj"
+   },
+   "ExtnMarket": {
+      "Description": "Market",
+      "message": "sk-sk"
+   },
+   "ExtnName": {
+      "Description": "Extension name",
+      "message": "Microsoft Bing Homepage a Search Engine"
+   },
+   "HomePage": {
+      "Description": "Homepage",
+      "message": "sk"
+   }
+}

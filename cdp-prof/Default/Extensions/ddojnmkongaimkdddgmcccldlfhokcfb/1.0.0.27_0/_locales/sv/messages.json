@@ -1,0 +1,18 @@
+{
+   "ExtnDescription": {
+      "Description": "Extension Description",
+      "message": "Ange Microsoft Bing som hemsida och standardsökmotor"
+   },
+   "ExtnMarket": {
+      "Description": "Market",
+      "message": "sv-se"
+   },
+   "ExtnName": {
+      "Description": "Extension name",
+      "message": "Microsoft Bing hemsida och sökmotor"
+   },
+   "HomePage": {
+      "Description": "Homepage",
+      "message": "sv"
+   }
+}

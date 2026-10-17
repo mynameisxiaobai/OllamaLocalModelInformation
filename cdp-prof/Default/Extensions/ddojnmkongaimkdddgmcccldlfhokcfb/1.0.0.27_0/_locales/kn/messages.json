@@ -1,0 +1,18 @@
+{
+   "ExtnDescription": {
+      "Description": "Extension Description",
+      "message": "Microsoft Bing ಅನ್ನು ನಿಮ್ಮ ಡಿಫಾಲ್ಟ್ ಹೋಂಪುಟವನ್ನಾಗಿ ಮಾಡಿ ಮತ್ತು ಶೋಧ ಎಂಜಿನ್"
+   },
+   "ExtnMarket": {
+      "Description": "Market",
+      "message": "kn-in"
+   },
+   "ExtnName": {
+      "Description": "Extension name",
+      "message": "Microsoft Bing ಶೋಧ ಮತ್ತು ಶೋಧ ಎಂಜಿನ್"
+   },
+   "HomePage": {
+      "Description": "Homepage",
+      "message": "kn"
+   }
+}

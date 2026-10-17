@@ -1,0 +1,18 @@
+{
+   "ExtnDescription": {
+      "Description": "Extension Description",
+      "message": "Indstil Microsoft Bing som din standardstartside og din standardsøgemaskine"
+   },
+   "ExtnMarket": {
+      "Description": "Market",
+      "message": "da-dk"
+   },
+   "ExtnName": {
+      "Description": "Extension name",
+      "message": "Microsoft Bing-startside og Microsoft Bing Search Engine"
+   },
+   "HomePage": {
+      "Description": "Homepage",
+      "message": "da"
+   }
+}

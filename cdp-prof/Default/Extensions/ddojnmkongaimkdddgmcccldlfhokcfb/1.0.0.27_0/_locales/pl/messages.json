@@ -1,0 +1,18 @@
+{
+   "ExtnDescription": {
+      "Description": "Extension Description",
+      "message": "Ustaw witrynę Microsoft Bing jako domyślną stronę główną i wyszukiwarkę domyślną"
+   },
+   "ExtnMarket": {
+      "Description": "Market",
+      "message": "pl-pl"
+   },
+   "ExtnName": {
+      "Description": "Extension name",
+      "message": "Strona główna i wyszukiwarka Microsoft Bing"
+   },
+   "HomePage": {
+      "Description": "Homepage",
+      "message": "pl"
+   }
+}
